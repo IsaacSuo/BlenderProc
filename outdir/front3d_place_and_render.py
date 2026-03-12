@@ -170,7 +170,10 @@ def place_object_on_support(mesh_objects, support_obj, rng):
     usable_max = support_max[:2] - xy_margin
 
     if np.any(usable_min >= usable_max):
-        return None
+        return {
+            "ok": False,
+            "reason": "support_top_too_small_for_object_footprint",
+        }
 
     sampled_xy = np.array([
         rng.uniform(float(usable_min[0]), float(usable_max[0])),
@@ -187,9 +190,13 @@ def place_object_on_support(mesh_objects, support_obj, rng):
     support_xy_min = support_min[:2]
     support_xy_max = support_max[:2]
     if np.any(footprint_center < support_xy_min) or np.any(footprint_center > support_xy_max):
-        return None
+        return {
+            "ok": False,
+            "reason": "sampled_position_outside_support_bounds",
+        }
 
     return {
+        "ok": True,
         "support_name": support_obj.get_name(),
         "support_top_z": float(support_max[2]),
         "support_center": support_center,
@@ -310,10 +317,17 @@ def main():
     scale_object_to_target_size(candidate_group, args.target_max_size)
 
     placement_info = place_object_on_support(candidate_group, support_obj, placement_rng)
-    if placement_info is None or not object_is_on_support(candidate_group, placement_info["support_top_z"]):
+    if not placement_info["ok"]:
         delete_group(candidate_group)
         raise RuntimeError(
-            f"Failed to place the custom object on selected support object: {support_obj.get_name()}"
+            f"Failed to place the custom object on selected support object: "
+            f"{support_obj.get_name()} ({placement_info['reason']})"
+        )
+    if not object_is_on_support(candidate_group, placement_info["support_top_z"]):
+        delete_group(candidate_group)
+        raise RuntimeError(
+            f"Failed to place the custom object on selected support object: "
+            f"{support_obj.get_name()} (object_bottom_not_aligned_with_support_top)"
         )
 
     selected_support_name = placement_info["support_name"]
