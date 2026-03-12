@@ -328,6 +328,7 @@ def main():
     delete_group(custom_obj_template)
 
     support_obj = support_candidates[0]
+    support_obj_name = support_obj.get_name()
     candidate_group = load_custom_object(paths["object_path"])
     scale_object_to_target_size(candidate_group, args.target_max_size)
 
@@ -336,7 +337,7 @@ def main():
         delete_group(candidate_group)
         raise RuntimeError(
             f"Failed to place the custom object on selected support object: "
-            f"{support_obj.get_name()} ({placement_info['reason']})"
+            f"{support_obj_name} ({placement_info['reason']})"
         )
 
     selected_support_name = placement_info["support_name"]
