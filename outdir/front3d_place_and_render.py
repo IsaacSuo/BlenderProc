@@ -154,27 +154,52 @@ def scale_object_to_target_size(mesh_objects, target_max_size):
     return scale_factor
 
 
-def place_object_on_surface(mesh_objects, surface_obj):
-    surface_bbox = surface_obj.get_bound_box()
-    surface_center = np.mean(surface_bbox, axis=0)
-    surface_top_z = float(np.max(surface_bbox[:, 2]))
+def place_object_on_support(mesh_objects, support_obj, rng):
+    support_bbox = support_obj.get_bound_box()
+    support_min = np.min(support_bbox, axis=0)
+    support_max = np.max(support_bbox, axis=0)
+    support_center = (support_min + support_max) / 2.0
+    support_extent = support_max - support_min
 
     group_center = get_group_center(mesh_objects)
+    group_extent = get_group_extent(mesh_objects)
     bbox_min, _ = get_group_bbox(mesh_objects)
+
+    xy_margin = np.maximum(group_extent[:2] * 0.55, 0.02)
+    usable_min = support_min[:2] + xy_margin
+    usable_max = support_max[:2] - xy_margin
+
+    if np.any(usable_min >= usable_max):
+        return None
+
+    sampled_xy = np.array([
+        rng.uniform(float(usable_min[0]), float(usable_max[0])),
+        rng.uniform(float(usable_min[1]), float(usable_max[1])),
+    ])
     offset = np.array([
-        surface_center[0] - group_center[0],
-        surface_center[1] - group_center[1],
-        surface_top_z - float(bbox_min[2]),
+        sampled_xy[0] - group_center[0],
+        sampled_xy[1] - group_center[1],
+        float(support_max[2]) - float(bbox_min[2]),
     ])
     translate_group(mesh_objects, offset)
-    return mesh_objects
+
+    footprint_center = get_group_center(mesh_objects)[:2]
+    support_xy_min = support_min[:2]
+    support_xy_max = support_max[:2]
+    if np.any(footprint_center < support_xy_min) or np.any(footprint_center > support_xy_max):
+        return None
+
+    return {
+        "support_name": support_obj.get_name(),
+        "support_top_z": float(support_max[2]),
+        "support_center": support_center,
+    }
 
 
-def object_is_on_surface(mesh_objects, surface_obj, tolerance=0.05):
+def object_is_on_support(mesh_objects, support_top_z, tolerance=0.05):
     bbox_min, _ = get_group_bbox(mesh_objects)
     obj_min_z = float(bbox_min[2])
-    surface_top_z = float(np.max(surface_obj.get_bound_box(local_coords=False), axis=0)[2])
-    return abs(obj_min_z - surface_top_z) <= tolerance
+    return abs(obj_min_z - float(support_top_z)) <= tolerance
 
 
 def apply_batch_render_material_strategy(mesh_objects, object_path):
@@ -268,6 +293,7 @@ def main():
         front_3D_texture_path=paths["front_texture_dir"],
         label_mapping=mapping,
     )
+    placement_rng = np.random.default_rng(render_profile.LOGIC_CONFIG.get("master_seed", 0))
 
     support_candidates = find_support_candidates(room_objs, args.support_keywords)
     if not support_candidates:
@@ -282,27 +308,18 @@ def main():
     placed_group = None
     selected_support_name = None
     selected_surface_name = None
-    updated_room_objs = list(room_objs)
     for support_obj in support_candidates:
-        surface_obj = bproc.object.slice_faces_with_normals(support_obj)
-        if surface_obj is None:
-            continue
-
         candidate_group = load_custom_object(paths["object_path"])
         scale_object_to_target_size(candidate_group, args.target_max_size)
 
-        placed_candidate = place_object_on_surface(candidate_group, surface_obj)
-        if placed_candidate is None or not object_is_on_surface(placed_candidate, surface_obj):
+        placement_info = place_object_on_support(candidate_group, support_obj, placement_rng)
+        if placement_info is None or not object_is_on_support(candidate_group, placement_info["support_top_z"]):
             delete_group(candidate_group)
-            surface_obj.join_with_other_objects([support_obj])
             continue
 
-        selected_support_name = support_obj.get_name()
-        selected_surface_name = surface_obj.get_name()
-        surface_obj.join_with_other_objects([support_obj])
-        updated_room_objs = [obj for obj in updated_room_objs if obj is not support_obj]
-        updated_room_objs.append(surface_obj)
-        placed_group = placed_candidate
+        selected_support_name = placement_info["support_name"]
+        selected_surface_name = placement_info["support_name"]
+        placed_group = candidate_group
         break
 
     if placed_group is None or selected_support_name is None:
