@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 
 def load_render_profile():
@@ -88,30 +88,53 @@ def find_support_candidates(room_objs, keywords):
     return [obj for _, _, obj in candidates]
 
 
-def merge_mesh_objects(mesh_objects):
-    if not mesh_objects:
-        raise RuntimeError("No mesh objects to merge.")
-    if len(mesh_objects) == 1:
-        return mesh_objects[0]
+def get_group_bbox(mesh_objects):
+    bbox_points = [obj.get_bound_box() for obj in mesh_objects]
+    all_points = np.concatenate(bbox_points, axis=0)
+    return np.min(all_points, axis=0), np.max(all_points, axis=0)
 
-    if bpy.context.mode != "OBJECT":
-        bpy.ops.object.mode_set(mode="OBJECT")
-    bpy.ops.object.select_all(action="DESELECT")
 
-    active_obj = mesh_objects[0].blender_obj
+def get_group_center(mesh_objects):
+    bbox_min, bbox_max = get_group_bbox(mesh_objects)
+    return (bbox_min + bbox_max) / 2.0
+
+
+def get_group_extent(mesh_objects):
+    bbox_min, bbox_max = get_group_bbox(mesh_objects)
+    return bbox_max - bbox_min
+
+
+def translate_group(mesh_objects, offset):
+    offset = np.asarray(offset, dtype=float)
     for obj in mesh_objects:
-        obj.blender_obj.select_set(True)
-    bpy.context.view_layer.objects.active = active_obj
+        obj.set_location(obj.get_location() + offset)
 
-    with bpy.context.temp_override(
-        active_object=active_obj,
-        object=active_obj,
-        selected_objects=[obj.blender_obj for obj in mesh_objects],
-        selected_editable_objects=[obj.blender_obj for obj in mesh_objects],
-    ):
-        bpy.ops.object.join()
 
-    return mesh_objects[0]
+def transform_group(mesh_objects, transform_matrix):
+    for obj in mesh_objects:
+        obj.set_local2world_mat(np.asarray(transform_matrix) @ obj.get_local2world_mat())
+
+
+def set_group_custom_properties(mesh_objects):
+    for obj in mesh_objects:
+        obj.set_cp("category_id", 999)
+        obj.set_cp("is_custom_object", True)
+
+
+def hide_group(mesh_objects, hide=True):
+    for obj in mesh_objects:
+        obj.hide(hide)
+
+
+def delete_group(mesh_objects):
+    for obj in mesh_objects:
+        obj.delete()
+
+
+def duplicate_group(mesh_objects):
+    duplicates = [obj.duplicate(linked=False) for obj in mesh_objects]
+    set_group_custom_properties(duplicates)
+    return duplicates
 
 
 def load_custom_object(object_path):
@@ -119,71 +142,52 @@ def load_custom_object(object_path):
     if not loaded:
         raise RuntimeError(f"Failed to load object: {object_path}")
 
-    root = merge_mesh_objects(loaded)
-
-    root.set_origin(np.mean(root.get_bound_box(), axis=0), mode="POINT")
-    root.set_cp("category_id", 999)
-    root.set_cp("is_custom_object", True)
-    return root
+    set_group_custom_properties(loaded)
+    return loaded
 
 
-def scale_object_to_target_size(obj, target_max_size):
-    bbox = obj.get_bound_box()
-    extent = np.max(bbox, axis=0) - np.min(bbox, axis=0)
+def scale_object_to_target_size(mesh_objects, target_max_size):
+    extent = get_group_extent(mesh_objects)
     largest_dim = float(np.max(extent))
     if largest_dim <= 0:
-        raise RuntimeError(f"Object has invalid bounding box: {obj.get_name()}")
+        raise RuntimeError("Object group has invalid bounding box.")
 
     scale_factor = target_max_size / largest_dim
-    obj.set_scale(np.array(obj.blender_obj.scale) * scale_factor)
-    obj.persist_transformation_into_mesh(location=False, rotation=False, scale=True)
+    center = get_group_center(mesh_objects)
+    scale_matrix = Matrix.Diagonal((scale_factor, scale_factor, scale_factor, 1.0))
+    transform = Matrix.Translation(center) @ scale_matrix @ Matrix.Translation(-Vector(center))
+    transform_group(mesh_objects, transform)
     return scale_factor
 
 
-def place_object_on_surface(custom_obj, surface_obj):
-    def sample_pose(obj):
-        obj.set_location(
-            bproc.sampler.upper_region(
-                objects_to_sample_on=[surface_obj],
-                min_height=0.2,
-                max_height=0.8,
-                use_ray_trace_check=False,
-            )
-        )
-        obj.set_rotation_euler(bproc.sampler.uniformSO3())
+def place_object_on_surface(mesh_objects, surface_obj):
+    surface_bbox = surface_obj.get_bound_box()
+    surface_center = np.mean(surface_bbox, axis=0)
+    surface_top_z = float(np.max(surface_bbox[:, 2]))
 
-    placed_objects = bproc.object.sample_poses_on_surface(
-        objects_to_sample=[custom_obj],
-        surface=surface_obj,
-        sample_pose_func=sample_pose,
-        min_distance=0.0,
-        max_distance=10.0,
-        check_all_bb_corners_over_surface=False,
-    )
-    if not placed_objects:
-        return None
-
-    placed = placed_objects[0]
-    placed.enable_rigidbody(True, collision_shape="CONVEX_HULL")
-    surface_obj.enable_rigidbody(False)
-    bproc.object.simulate_physics_and_fix_final_poses(
-        min_simulation_time=2,
-        max_simulation_time=4,
-        check_object_interval=1,
-    )
-    return placed
+    group_center = get_group_center(mesh_objects)
+    bbox_min, _ = get_group_bbox(mesh_objects)
+    offset = np.array([
+        surface_center[0] - group_center[0],
+        surface_center[1] - group_center[1],
+        surface_top_z - float(bbox_min[2]),
+    ])
+    translate_group(mesh_objects, offset)
+    return mesh_objects
 
 
-def object_is_on_surface(obj, surface_obj, tolerance=0.05):
-    obj_min_z = float(np.min(obj.get_bound_box(local_coords=False), axis=0)[2])
+def object_is_on_surface(mesh_objects, surface_obj, tolerance=0.05):
+    bbox_min, _ = get_group_bbox(mesh_objects)
+    obj_min_z = float(bbox_min[2])
     surface_top_z = float(np.max(surface_obj.get_bound_box(local_coords=False), axis=0)[2])
     return abs(obj_min_z - surface_top_z) <= tolerance
 
 
-def apply_batch_render_material_strategy(obj, object_path):
+def apply_batch_render_material_strategy(mesh_objects, object_path):
     material_params = render_profile.sample_material_params_for_object(object_path)
-    obj.blender_obj["_material_params_json"] = json.dumps(material_params, ensure_ascii=False)
-    render_profile.apply_material(obj.blender_obj)
+    for obj in mesh_objects:
+        obj.blender_obj["_material_params_json"] = json.dumps(material_params, ensure_ascii=False)
+        render_profile.apply_material(obj.blender_obj)
 
 
 def add_batch_render_camera_poses(anchor_obj):
@@ -279,9 +283,9 @@ def main():
 
     custom_obj_template = load_custom_object(paths["object_path"])
     scale_factor = scale_object_to_target_size(custom_obj_template, args.target_max_size)
-    custom_obj_template.hide(True)
+    hide_group(custom_obj_template, True)
 
-    placed_obj = None
+    placed_group = None
     selected_support_name = None
     selected_surface_name = None
     updated_room_objs = list(room_objs)
@@ -290,14 +294,12 @@ def main():
         if surface_obj is None:
             continue
 
-        candidate_obj = custom_obj_template.duplicate(linked=False)
-        candidate_obj.hide(False)
-        candidate_obj.set_cp("category_id", 999)
-        candidate_obj.set_cp("is_custom_object", True)
+        candidate_group = duplicate_group(custom_obj_template)
+        hide_group(candidate_group, False)
 
-        placed_candidate = place_object_on_surface(candidate_obj, surface_obj)
+        placed_candidate = place_object_on_surface(candidate_group, surface_obj)
         if placed_candidate is None or not object_is_on_surface(placed_candidate, surface_obj):
-            candidate_obj.delete()
+            delete_group(candidate_group)
             surface_obj.join_with_other_objects([support_obj])
             continue
 
@@ -306,20 +308,20 @@ def main():
         surface_obj.join_with_other_objects([support_obj])
         updated_room_objs = [obj for obj in updated_room_objs if obj is not support_obj]
         updated_room_objs.append(surface_obj)
-        placed_obj = placed_candidate
+        placed_group = placed_candidate
         break
 
-    if placed_obj is None or selected_support_name is None:
+    if placed_group is None or selected_support_name is None:
         raise RuntimeError("Failed to place the custom object on any support surface.")
 
-    custom_obj_template.delete()
+    delete_group(custom_obj_template)
 
-    apply_batch_render_material_strategy(placed_obj, paths["object_path"])
+    apply_batch_render_material_strategy(placed_group, paths["object_path"])
 
     anchor = bproc.object.create_primitive("CUBE")
     anchor.set_name("ANCHOR")
     anchor.hide(True)
-    anchor.set_location(np.mean(placed_obj.get_bound_box(), axis=0))
+    anchor.set_location(get_group_center(placed_group))
 
     camera_count = add_batch_render_camera_poses(anchor)
 
