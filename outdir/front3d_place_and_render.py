@@ -131,6 +131,24 @@ def delete_group(mesh_objects):
         obj.delete()
 
 
+def get_group_pose_matrix(mesh_objects):
+    center = get_group_center(mesh_objects)
+    return np.array(Matrix.Translation(Vector(center)))
+
+
+def create_group_proxy(mesh_objects):
+    extent = get_group_extent(mesh_objects)
+    center = get_group_center(mesh_objects)
+    proxy = bproc.object.create_primitive("CUBE")
+    proxy.set_name("CustomObjectProxy")
+    proxy.set_scale(np.maximum(extent / 2.0, 1e-4))
+    proxy.set_location(center)
+    proxy.persist_transformation_into_mesh(location=False, rotation=False, scale=True)
+    proxy.set_cp("category_id", 999)
+    proxy.hide(True)
+    return proxy
+
+
 def load_custom_object(object_path):
     loaded = bproc.loader.load_obj(object_path)
     if not loaded:
@@ -154,59 +172,58 @@ def scale_object_to_target_size(mesh_objects, target_max_size):
     return scale_factor
 
 
-def place_object_on_support(mesh_objects, support_obj, rng):
-    support_bbox = support_obj.get_bound_box()
-    support_min = np.min(support_bbox, axis=0)
-    support_max = np.max(support_bbox, axis=0)
-    support_center = (support_min + support_max) / 2.0
-    support_extent = support_max - support_min
+def place_object_on_surface(mesh_objects, support_obj):
+    surface_obj = bproc.object.slice_faces_with_normals(support_obj)
+    if surface_obj is None:
+        return {"ok": False, "reason": "no_upward_surface_extracted"}
 
-    group_center = get_group_center(mesh_objects)
-    group_extent = get_group_extent(mesh_objects)
+    proxy = create_group_proxy(mesh_objects)
+    initial_group_pose = get_group_pose_matrix(mesh_objects)
+    initial_proxy_pose = proxy.get_local2world_mat()
+
+    def sample_pose(obj):
+        obj.set_location(
+            bproc.sampler.upper_region(
+                objects_to_sample_on=[surface_obj],
+                min_height=0.2,
+                max_height=0.8,
+                use_ray_trace_check=False,
+            )
+        )
+        obj.set_rotation_euler(bproc.sampler.uniformSO3())
+
+    placed_objects = bproc.object.sample_poses_on_surface(
+        objects_to_sample=[proxy],
+        surface=surface_obj,
+        sample_pose_func=sample_pose,
+        min_distance=0.0,
+        max_distance=10.0,
+        check_all_bb_corners_over_surface=False,
+    )
+    if not placed_objects:
+        proxy.delete()
+        surface_obj.join_with_other_objects([support_obj])
+        return {"ok": False, "reason": "surface_sampler_failed"}
+
+    placed_proxy = placed_objects[0]
+    transform_delta = np.asarray(placed_proxy.get_local2world_mat()) @ np.linalg.inv(np.asarray(initial_proxy_pose))
+    transform_group(mesh_objects, transform_delta)
+
+    surface_height_z = float(np.mean(surface_obj.get_bound_box(), axis=0)[2])
     bbox_min, _ = get_group_bbox(mesh_objects)
+    if abs(float(bbox_min[2]) - surface_height_z) > 0.05:
+        proxy.delete()
+        surface_obj.join_with_other_objects([support_obj])
+        transform_group(mesh_objects, np.linalg.inv(transform_delta))
+        return {"ok": False, "reason": "object_bottom_not_aligned_with_surface"}
 
-    xy_margin = np.maximum(group_extent[:2] * 0.55, 0.02)
-    usable_min = support_min[:2] + xy_margin
-    usable_max = support_max[:2] - xy_margin
-
-    if np.any(usable_min >= usable_max):
-        return {
-            "ok": False,
-            "reason": "support_top_too_small_for_object_footprint",
-        }
-
-    sampled_xy = np.array([
-        rng.uniform(float(usable_min[0]), float(usable_max[0])),
-        rng.uniform(float(usable_min[1]), float(usable_max[1])),
-    ])
-    offset = np.array([
-        sampled_xy[0] - group_center[0],
-        sampled_xy[1] - group_center[1],
-        float(support_max[2]) - float(bbox_min[2]),
-    ])
-    translate_group(mesh_objects, offset)
-
-    footprint_center = get_group_center(mesh_objects)[:2]
-    support_xy_min = support_min[:2]
-    support_xy_max = support_max[:2]
-    if np.any(footprint_center < support_xy_min) or np.any(footprint_center > support_xy_max):
-        return {
-            "ok": False,
-            "reason": "sampled_position_outside_support_bounds",
-        }
-
+    proxy.delete()
+    surface_obj.join_with_other_objects([support_obj])
     return {
         "ok": True,
         "support_name": support_obj.get_name(),
-        "support_top_z": float(support_max[2]),
-        "support_center": support_center,
+        "surface_name": surface_obj.get_name(),
     }
-
-
-def object_is_on_support(mesh_objects, support_top_z, tolerance=0.05):
-    bbox_min, _ = get_group_bbox(mesh_objects)
-    obj_min_z = float(bbox_min[2])
-    return abs(obj_min_z - float(support_top_z)) <= tolerance
 
 
 def apply_batch_render_material_strategy(mesh_objects, object_path):
@@ -300,8 +317,6 @@ def main():
         front_3D_texture_path=paths["front_texture_dir"],
         label_mapping=mapping,
     )
-    placement_rng = np.random.default_rng(render_profile.LOGIC_CONFIG.get("master_seed", 0))
-
     support_candidates = find_support_candidates(room_objs, args.support_keywords)
     if not support_candidates:
         raise RuntimeError(
@@ -316,22 +331,16 @@ def main():
     candidate_group = load_custom_object(paths["object_path"])
     scale_object_to_target_size(candidate_group, args.target_max_size)
 
-    placement_info = place_object_on_support(candidate_group, support_obj, placement_rng)
+    placement_info = place_object_on_surface(candidate_group, support_obj)
     if not placement_info["ok"]:
         delete_group(candidate_group)
         raise RuntimeError(
             f"Failed to place the custom object on selected support object: "
             f"{support_obj.get_name()} ({placement_info['reason']})"
         )
-    if not object_is_on_support(candidate_group, placement_info["support_top_z"]):
-        delete_group(candidate_group)
-        raise RuntimeError(
-            f"Failed to place the custom object on selected support object: "
-            f"{support_obj.get_name()} (object_bottom_not_aligned_with_support_top)"
-        )
 
     selected_support_name = placement_info["support_name"]
-    selected_surface_name = placement_info["support_name"]
+    selected_surface_name = placement_info["surface_name"]
     placed_group = candidate_group
 
     apply_batch_render_material_strategy(placed_group, paths["object_path"])
