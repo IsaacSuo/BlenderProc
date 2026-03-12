@@ -131,12 +131,6 @@ def delete_group(mesh_objects):
         obj.delete()
 
 
-def duplicate_group(mesh_objects):
-    duplicates = [obj.duplicate(linked=False) for obj in mesh_objects]
-    set_group_custom_properties(duplicates)
-    return duplicates
-
-
 def load_custom_object(object_path):
     loaded = bproc.loader.load_obj(object_path)
     if not loaded:
@@ -283,7 +277,7 @@ def main():
 
     custom_obj_template = load_custom_object(paths["object_path"])
     scale_factor = scale_object_to_target_size(custom_obj_template, args.target_max_size)
-    hide_group(custom_obj_template, True)
+    delete_group(custom_obj_template)
 
     placed_group = None
     selected_support_name = None
@@ -294,8 +288,8 @@ def main():
         if surface_obj is None:
             continue
 
-        candidate_group = duplicate_group(custom_obj_template)
-        hide_group(candidate_group, False)
+        candidate_group = load_custom_object(paths["object_path"])
+        scale_object_to_target_size(candidate_group, args.target_max_size)
 
         placed_candidate = place_object_on_surface(candidate_group, surface_obj)
         if placed_candidate is None or not object_is_on_surface(placed_candidate, surface_obj):
@@ -313,8 +307,6 @@ def main():
 
     if placed_group is None or selected_support_name is None:
         raise RuntimeError("Failed to place the custom object on any support surface.")
-
-    delete_group(custom_obj_template)
 
     apply_batch_render_material_strategy(placed_group, paths["object_path"])
 
