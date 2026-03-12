@@ -1,13 +1,27 @@
 import blenderproc as bproc
 import argparse
+import importlib.util
 import json
 import math
 import os
+from pathlib import Path
 
 import numpy as np
 import bpy
 from mathutils import Vector
-import batch_render_profile as render_profile
+
+
+def load_render_profile():
+    module_path = Path(__file__).with_name("batch_render_profile.py")
+    spec = importlib.util.spec_from_file_location("batch_render_profile", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Failed to load render profile module from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+render_profile = load_render_profile()
 
 
 def parse_args():
