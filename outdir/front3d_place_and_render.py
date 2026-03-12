@@ -92,14 +92,24 @@ def find_support_candidates(room_objs, keywords):
 
 
 def merge_mesh_objects(mesh_objects):
-    if len(mesh_objects) == 1:
-        return mesh_objects[0]
+    valid_mesh_objects = [
+        mesh_object for mesh_object in mesh_objects
+        if getattr(mesh_object, "blender_obj", None) is not None
+        and getattr(mesh_object.blender_obj, "type", None) == "MESH"
+        and getattr(mesh_object.blender_obj, "data", None) is not None
+    ]
+
+    if not valid_mesh_objects:
+        raise RuntimeError("No valid mesh geometry found after import.")
+
+    if len(valid_mesh_objects) == 1:
+        return valid_mesh_objects[0]
 
     merged_bm = bmesh.new()
     merged_materials = []
     merged_material_index_map = {}
 
-    for mesh_object in mesh_objects:
+    for mesh_object in valid_mesh_objects:
         blender_obj = mesh_object.blender_obj
         source_mesh = blender_obj.data
 
@@ -131,7 +141,7 @@ def merge_mesh_objects(mesh_objects):
     for material in merged_materials:
         merged_mesh_data.materials.append(material)
 
-    for mesh_object in mesh_objects:
+    for mesh_object in valid_mesh_objects:
         mesh_object.delete()
 
     return MeshObject(merged_blender_obj)
