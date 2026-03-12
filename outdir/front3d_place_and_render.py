@@ -88,14 +88,38 @@ def find_support_candidates(room_objs, keywords):
     return [obj for _, _, obj in candidates]
 
 
+def merge_mesh_objects(mesh_objects):
+    if not mesh_objects:
+        raise RuntimeError("No mesh objects to merge.")
+    if len(mesh_objects) == 1:
+        return mesh_objects[0]
+
+    if bpy.context.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.ops.object.select_all(action="DESELECT")
+
+    active_obj = mesh_objects[0].blender_obj
+    for obj in mesh_objects:
+        obj.blender_obj.select_set(True)
+    bpy.context.view_layer.objects.active = active_obj
+
+    with bpy.context.temp_override(
+        active_object=active_obj,
+        object=active_obj,
+        selected_objects=[obj.blender_obj for obj in mesh_objects],
+        selected_editable_objects=[obj.blender_obj for obj in mesh_objects],
+    ):
+        bpy.ops.object.join()
+
+    return mesh_objects[0]
+
+
 def load_custom_object(object_path):
     loaded = bproc.loader.load_obj(object_path)
     if not loaded:
         raise RuntimeError(f"Failed to load object: {object_path}")
 
-    root = loaded[0]
-    if len(loaded) > 1:
-        root.join_with_other_objects(loaded[1:])
+    root = merge_mesh_objects(loaded)
 
     root.set_origin(np.mean(root.get_bound_box(), axis=0), mode="POINT")
     root.set_cp("category_id", 999)
