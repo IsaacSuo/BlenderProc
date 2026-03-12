@@ -7,8 +7,10 @@ import os
 from pathlib import Path
 
 import bpy
+import bmesh
 import numpy as np
 from mathutils import Vector
+from blenderproc.python.types.MeshObjectUtility import MeshObject
 
 
 def load_render_profile():
@@ -89,18 +91,58 @@ def find_support_candidates(room_objs, keywords):
     return [obj for _, _, obj in candidates]
 
 
+def merge_mesh_objects(mesh_objects):
+    if len(mesh_objects) == 1:
+        return mesh_objects[0]
+
+    merged_bm = bmesh.new()
+    merged_materials = []
+    merged_material_index_map = {}
+
+    for mesh_object in mesh_objects:
+        blender_obj = mesh_object.blender_obj
+        source_mesh = blender_obj.data
+
+        local_material_map = {}
+        for src_index, material in enumerate(source_mesh.materials):
+            key = material.as_pointer() if material is not None else ("__none__", src_index)
+            if key not in merged_material_index_map:
+                merged_material_index_map[key] = len(merged_materials)
+                merged_materials.append(material)
+            local_material_map[src_index] = merged_material_index_map[key]
+
+        vert_offset = len(merged_bm.verts)
+        face_offset = len(merged_bm.faces)
+        merged_bm.from_mesh(source_mesh)
+
+        new_verts = list(merged_bm.verts)[vert_offset:]
+        bmesh.ops.transform(merged_bm, verts=new_verts, matrix=blender_obj.matrix_world)
+
+        new_faces = list(merged_bm.faces)[face_offset:]
+        for face in new_faces:
+            face.material_index = local_material_map.get(face.material_index, 0)
+
+    merged_mesh_data = bpy.data.meshes.new(name="Merged_Custom_Mesh")
+    merged_bm.to_mesh(merged_mesh_data)
+    merged_bm.free()
+
+    merged_blender_obj = bpy.data.objects.new("Merged_Custom_Object", merged_mesh_data)
+    bpy.context.scene.collection.objects.link(merged_blender_obj)
+    for material in merged_materials:
+        merged_mesh_data.materials.append(material)
+
+    for mesh_object in mesh_objects:
+        mesh_object.delete()
+
+    return MeshObject(merged_blender_obj)
+
+
 def load_custom_object(object_path):
     loaded = bproc.loader.load_obj(object_path)
     if not loaded:
         raise RuntimeError(f"Failed to load custom object: {object_path}")
-    if len(loaded) != 1:
-        names = ", ".join(obj.get_name() for obj in loaded[:8])
-        raise RuntimeError(
-            "Custom object must import as a single mesh for clean BlenderProc placement. "
-            f"Imported {len(loaded)} meshes: {names}"
-        )
 
-    obj = loaded[0]
+    obj = merge_mesh_objects(loaded)
     obj.set_origin(np.mean(obj.get_bound_box(), axis=0), mode="POINT")
     obj.set_cp("category_id", 999)
     obj.set_cp("is_custom_object", True)
