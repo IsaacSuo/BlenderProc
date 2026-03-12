@@ -190,6 +190,18 @@ def write_metadata(output_dir, front_json, object_path, support_name, surface_na
         json.dump(metadata, file, indent=2)
 
 
+def add_binary_mask_from_category_id(data, target_category_id=999):
+    category_segmaps = data.get("category_id_segmaps")
+    if category_segmaps is None:
+        raise KeyError("category_id_segmaps is missing; cannot derive binary mask.")
+
+    binary_masks = []
+    for segmap in category_segmaps:
+        binary_masks.append((segmap == target_category_id).astype(np.uint8) * 255)
+    data["binary_masks"] = binary_masks
+    return data
+
+
 def main():
     args = parse_args()
     validate_paths(args)
@@ -269,9 +281,11 @@ def main():
 
     camera_count = add_batch_render_camera_poses(batch_render, anchor)
 
+    bproc.renderer.enable_depth_output(activate_antialiasing=False)
     bproc.renderer.enable_normals_output()
     bproc.renderer.enable_segmentation_output(map_by=["category_id", "instance", "name"])
     data = bproc.renderer.render()
+    data = add_binary_mask_from_category_id(data, target_category_id=999)
     bproc.writer.write_hdf5(args.output_dir, data)
 
     write_metadata(
