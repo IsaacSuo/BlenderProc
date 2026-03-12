@@ -305,25 +305,20 @@ def main():
     scale_factor = scale_object_to_target_size(custom_obj_template, args.target_max_size)
     delete_group(custom_obj_template)
 
-    placed_group = None
-    selected_support_name = None
-    selected_surface_name = None
-    for support_obj in support_candidates:
-        candidate_group = load_custom_object(paths["object_path"])
-        scale_object_to_target_size(candidate_group, args.target_max_size)
+    support_obj = support_candidates[0]
+    candidate_group = load_custom_object(paths["object_path"])
+    scale_object_to_target_size(candidate_group, args.target_max_size)
 
-        placement_info = place_object_on_support(candidate_group, support_obj, placement_rng)
-        if placement_info is None or not object_is_on_support(candidate_group, placement_info["support_top_z"]):
-            delete_group(candidate_group)
-            continue
+    placement_info = place_object_on_support(candidate_group, support_obj, placement_rng)
+    if placement_info is None or not object_is_on_support(candidate_group, placement_info["support_top_z"]):
+        delete_group(candidate_group)
+        raise RuntimeError(
+            f"Failed to place the custom object on selected support object: {support_obj.get_name()}"
+        )
 
-        selected_support_name = placement_info["support_name"]
-        selected_surface_name = placement_info["support_name"]
-        placed_group = candidate_group
-        break
-
-    if placed_group is None or selected_support_name is None:
-        raise RuntimeError("Failed to place the custom object on any support surface.")
+    selected_support_name = placement_info["support_name"]
+    selected_surface_name = placement_info["support_name"]
+    placed_group = candidate_group
 
     apply_batch_render_material_strategy(placed_group, paths["object_path"])
 
