@@ -200,13 +200,14 @@ def place_object_on_surface(custom_obj, support_obj):
         surface_obj.join_with_other_objects([support_obj])
         return {"ok": False, "reason": "surface_sampler_failed", "support_name": support_name}
 
-    custom_obj.enable_rigidbody(True, collision_shape="CONVEX_HULL")
-    surface_obj.enable_rigidbody(False)
-    bproc.object.simulate_physics_and_fix_final_poses(
-        min_simulation_time=2,
-        max_simulation_time=4,
-        check_object_interval=1,
-    )
+    if render_profile.LOGIC_CONFIG.get("use_physics", False):
+        custom_obj.enable_rigidbody(True, collision_shape="CONVEX_HULL")
+        surface_obj.enable_rigidbody(False)
+        bproc.object.simulate_physics_and_fix_final_poses(
+            min_simulation_time=2,
+            max_simulation_time=4,
+            check_object_interval=1,
+        )
 
     surface_height_z = float(np.mean(surface_obj.get_bound_box(), axis=0)[2])
     object_bottom_z = float(np.min(custom_obj.get_bound_box(local_coords=False), axis=0)[2])

@@ -108,6 +108,7 @@ logic:
   margin: 1.4
   lens: 50
   master_seed: 0
+  use_physics: false
 
 render:
   engine: CYCLES
