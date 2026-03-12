@@ -1,0 +1,127 @@
+material:
+  type_sampling: weighted
+  type: glass_clear
+  type_weights:
+    glass_clear: 0.25
+    glass_frosted: 0.10
+    glass_tinted: 0.05
+    plastic: 0.25
+    ceramic: 0.15
+    metal_painted: 0.15
+    metal_car_paint: 0.10
+    rubber: 0.05
+  tint_color_rgba: [0.85, 0.95, 1.0, 1.0]
+  tint_density: 0.5
+  frosted_roughness: 0.2
+  ior: 1.5
+  glass_apply_distribution: true
+  glass_distribution_clear: GGX
+  glass_distribution_frosted: GGX
+  randomize: true
+  seed: 0
+  random_glass:
+    ior_min: 1.47
+    ior_max: 1.53
+    clear_roughness_min: 0.0
+    clear_roughness_max: 0.002
+    frosted_roughness_min: 0.10
+    frosted_roughness_max: 0.60
+    allow_clear_tint_prob: 0.0
+    clear_tint_density_min: 0.01
+    clear_tint_density_max: 0.08
+    clear_tint_base_rgb: [0.92, 0.97, 1.0]
+    clear_tint_jitter: 0.03
+    tinted_density_min: 0.60
+    tinted_density_max: 1.80
+    tinted_base_rgb: [0.72, 0.84, 0.98]
+    tinted_jitter: 0.08
+  random_plastic:
+    roughness_min: 0.05
+    roughness_max: 0.60
+    specular_min: 0.35
+    specular_max: 0.55
+    clearcoat_min: 0.0
+    clearcoat_max: 0.25
+    clearcoat_roughness_min: 0.0
+    clearcoat_roughness_max: 0.20
+    value_min: 0.15
+    value_max: 0.95
+    saturation_max: 0.55
+  random_ceramic:
+    roughness_min: 0.03
+    roughness_max: 0.45
+    specular_min: 0.45
+    specular_max: 0.70
+    clearcoat_min: 0.20
+    clearcoat_max: 0.35
+    clearcoat_roughness_min: 0.0
+    clearcoat_roughness_max: 0.25
+    value_min: 0.40
+    value_max: 1.00
+    saturation_max: 0.30
+  random_metal_painted:
+    roughness_min: 0.04
+    roughness_max: 0.35
+    specular_min: 0.40
+    specular_max: 0.60
+    clearcoat_min: 0.20
+    clearcoat_max: 1.00
+    clearcoat_roughness_min: 0.0
+    clearcoat_roughness_max: 0.15
+    value_min: 0.20
+    value_max: 0.95
+    saturation_max: 0.70
+  random_metal_car_paint:
+    roughness_min: 0.18
+    roughness_max: 0.40
+    clearcoat_min: 0.80
+    clearcoat_max: 1.00
+    clearcoat_roughness_min: 0.0
+    clearcoat_roughness_max: 0.12
+    value_min: 0.18
+    value_max: 0.90
+    saturation_max: 0.75
+  random_rubber:
+    roughness_min: 0.60
+    roughness_max: 0.95
+    specular_min: 0.40
+    specular_max: 0.50
+    value_min: 0.02
+    value_max: 0.25
+    saturation_max: 0.20
+    sheen_min: 0.0
+    sheen_max: 0.25
+    sheen_tint_min: 0.0
+    sheen_tint_max: 0.50
+
+logic:
+  num_views: 10
+  use_hemisphere: true
+  target_diameter: 1.0
+  margin: 1.4
+  lens: 50
+  master_seed: 0
+
+render:
+  engine: CYCLES
+  device: GPU
+  gpu_backend: CUDA
+  gpu_indices: [0]
+  samples_max: 1024
+  samples_min: 2048
+  noise_threshold: 0.0005
+  time_limit: 0
+  use_denoising: false
+  light_paths:
+    max_bounces: 32
+    diffuse_bounces: 16
+    glossy_bounces: 16
+    transparent_max: 32
+    transmission: 16
+  caustics_reflective: true
+  caustics_refractive: true
+  blur_glossy: 0.0
+  use_light_tree: false
+  res_x: 1600
+  res_y: 1200
+  res_percent: 100

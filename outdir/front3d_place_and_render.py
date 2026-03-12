@@ -1,14 +1,13 @@
 import argparse
-import importlib.util
 import json
 import math
 import os
-from pathlib import Path
 
 import blenderproc as bproc
 import numpy as np
 import bpy
 from mathutils import Vector
+import batch_render_profile as render_profile
 
 
 def parse_args():
@@ -39,16 +38,6 @@ def validate_paths(args):
     for path in [args.front_json, args.future_model_dir, args.front_texture_dir, args.object_path]:
         if not os.path.exists(path):
             raise FileNotFoundError(path)
-
-
-def load_batch_render_module():
-    batch_render_path = Path(__file__).with_name("batch_render.py")
-    spec = importlib.util.spec_from_file_location("front3d_batch_render_strategy", batch_render_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Failed to load batch_render.py from {batch_render_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def find_support_candidates(room_objs, keywords):
@@ -138,35 +127,35 @@ def object_is_on_surface(obj, surface_obj, tolerance=0.05):
     return abs(obj_min_z - surface_top_z) <= tolerance
 
 
-def apply_batch_render_material_strategy(batch_render, obj, object_path):
-    material_params = batch_render.sample_material_params_for_object(object_path)
+def apply_batch_render_material_strategy(obj, object_path):
+    material_params = render_profile.sample_material_params_for_object(object_path)
     obj.blender_obj["_material_params_json"] = json.dumps(material_params, ensure_ascii=False)
-    batch_render.apply_material(obj.blender_obj)
+    render_profile.apply_material(obj.blender_obj)
 
 
-def add_batch_render_camera_poses(batch_render, anchor_obj):
-    batch_render.setup_render_settings()
+def add_batch_render_camera_poses(anchor_obj):
+    render_profile.setup_render_settings()
 
     scene = bpy.context.scene
-    cam_obj = batch_render.create_smart_camera(anchor_obj.blender_obj)
+    cam_obj = render_profile.create_smart_camera(anchor_obj.blender_obj)
     bproc.camera.set_intrinsics_from_blender_params(
-        lens=batch_render.LOGIC_CONFIG["lens"],
-        image_width=batch_render.RENDER_CONFIG["res_x"],
-        image_height=batch_render.RENDER_CONFIG["res_y"],
+        lens=render_profile.LOGIC_CONFIG["lens"],
+        image_width=render_profile.RENDER_CONFIG["res_x"],
+        image_height=render_profile.RENDER_CONFIG["res_y"],
     )
 
-    target_radius = batch_render.LOGIC_CONFIG["target_diameter"] / 2.0
-    margin = batch_render.LOGIC_CONFIG["margin"]
+    target_radius = render_profile.LOGIC_CONFIG["target_diameter"] / 2.0
+    margin = render_profile.LOGIC_CONFIG["margin"]
     fov_h = cam_obj.data.angle
     aspect_ratio = scene.render.resolution_x / scene.render.resolution_y
     fov_v = 2 * math.atan(math.tan(fov_h / 2) / aspect_ratio)
     safe_distance_3d = (target_radius * margin) / math.sin(min(fov_h, fov_v) / 2)
 
-    camera_positions_local = batch_render.generate_fibonacci_points(
-        n_samples=batch_render.LOGIC_CONFIG["num_views"],
+    camera_positions_local = render_profile.generate_fibonacci_points(
+        n_samples=render_profile.LOGIC_CONFIG["num_views"],
         radius=safe_distance_3d,
         center_loc=Vector((0, 0, 0)),
-        hemisphere=batch_render.LOGIC_CONFIG["use_hemisphere"],
+        hemisphere=render_profile.LOGIC_CONFIG["use_hemisphere"],
     )
 
     for pos_local in camera_positions_local:
@@ -205,7 +194,6 @@ def add_binary_mask_from_category_id(data, target_category_id=999):
 def main():
     args = parse_args()
     validate_paths(args)
-    batch_render = load_batch_render_module()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -272,14 +260,14 @@ def main():
 
     custom_obj_template.delete()
 
-    apply_batch_render_material_strategy(batch_render, placed_obj, args.object_path)
+    apply_batch_render_material_strategy(placed_obj, args.object_path)
 
     anchor = bproc.object.create_primitive("CUBE")
     anchor.set_name("ANCHOR")
     anchor.hide(True)
     anchor.set_location(np.mean(placed_obj.get_bound_box(), axis=0))
 
-    camera_count = add_batch_render_camera_poses(batch_render, anchor)
+    camera_count = add_batch_render_camera_poses(anchor)
 
     bproc.renderer.enable_depth_output(activate_antialiasing=False)
     bproc.renderer.enable_normals_output()
