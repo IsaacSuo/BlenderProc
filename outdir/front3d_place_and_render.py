@@ -1,9 +1,9 @@
+import blenderproc as bproc
 import argparse
 import json
 import math
 import os
 
-import blenderproc as bproc
 import numpy as np
 import bpy
 from mathutils import Vector
