@@ -211,6 +211,11 @@ def place_object_on_surface(mesh_objects, support_obj):
 
     surface_height_z = float(np.mean(surface_obj.get_bound_box(), axis=0)[2])
     bbox_min, _ = get_group_bbox(mesh_objects)
+    z_offset = surface_height_z - float(bbox_min[2])
+    if abs(z_offset) > 1e-6:
+        translate_group(mesh_objects, np.array([0.0, 0.0, z_offset]))
+
+    bbox_min, _ = get_group_bbox(mesh_objects)
     if abs(float(bbox_min[2]) - surface_height_z) > 0.05:
         proxy.delete()
         surface_obj.join_with_other_objects([support_obj])
