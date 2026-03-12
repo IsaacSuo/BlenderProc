@@ -14,11 +14,11 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Place a custom GLB object into a 3D-FRONT room and render it from sampled cameras."
     )
-    parser.add_argument("front_json", help="Path to a single 3D-FRONT room json file.")
-    parser.add_argument("future_model_dir", help="Path to the 3D-FUTURE-model directory.")
-    parser.add_argument("front_texture_dir", help="Path to the 3D-FRONT-texture directory.")
-    parser.add_argument("object_path", help="Path to the custom object file (.glb/.gltf/.obj/.ply/.fbx...).")
-    parser.add_argument("output_dir", help="Path to the output directory.")
+    parser.add_argument("front_json", nargs="?", help="Path to a single 3D-FRONT room json file.")
+    parser.add_argument("future_model_dir", nargs="?", help="Path to the 3D-FUTURE-model directory.")
+    parser.add_argument("front_texture_dir", nargs="?", help="Path to the 3D-FRONT-texture directory.")
+    parser.add_argument("object_path", nargs="?", help="Path to the custom object file (.glb/.gltf/.obj/.ply/.fbx...).")
+    parser.add_argument("output_dir", nargs="?", help="Path to the output directory.")
     parser.add_argument(
         "--support-keywords",
         nargs="+",
@@ -34,8 +34,23 @@ def parse_args():
     return parser.parse_args()
 
 
-def validate_paths(args):
-    for path in [args.front_json, args.future_model_dir, args.front_texture_dir, args.object_path]:
+def resolve_runtime_paths(args):
+    config_paths = render_profile.PATHS_CONFIG
+    resolved = {
+        "front_json": args.front_json or config_paths.get("front_json"),
+        "future_model_dir": args.future_model_dir or config_paths.get("future_model_dir"),
+        "front_texture_dir": args.front_texture_dir or config_paths.get("front_texture_dir"),
+        "object_path": args.object_path or config_paths.get("object_path"),
+        "output_dir": args.output_dir or config_paths.get("output_dir"),
+    }
+    missing = [key for key, value in resolved.items() if not value]
+    if missing:
+        raise ValueError(f"Missing required path config: {', '.join(missing)}")
+    return resolved
+
+
+def validate_paths(paths):
+    for path in [paths["front_json"], paths["future_model_dir"], paths["front_texture_dir"], paths["object_path"]]:
         if not os.path.exists(path):
             raise FileNotFoundError(path)
 
@@ -193,9 +208,10 @@ def add_binary_mask_from_category_id(data, target_category_id=999):
 
 def main():
     args = parse_args()
-    validate_paths(args)
+    paths = resolve_runtime_paths(args)
+    validate_paths(paths)
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(paths["output_dir"], exist_ok=True)
 
     bproc.init()
 
@@ -211,9 +227,9 @@ def main():
     )
 
     room_objs = bproc.loader.load_front3d(
-        json_path=args.front_json,
-        future_model_path=args.future_model_dir,
-        front_3D_texture_path=args.front_texture_dir,
+        json_path=paths["front_json"],
+        future_model_path=paths["future_model_dir"],
+        front_3D_texture_path=paths["front_texture_dir"],
         label_mapping=mapping,
     )
 
@@ -223,7 +239,7 @@ def main():
             f"No support object found. Keywords tried: {', '.join(args.support_keywords)}"
         )
 
-    custom_obj_template = load_custom_object(args.object_path)
+    custom_obj_template = load_custom_object(paths["object_path"])
     scale_factor = scale_object_to_target_size(custom_obj_template, args.target_max_size)
     custom_obj_template.hide(True)
 
@@ -260,7 +276,7 @@ def main():
 
     custom_obj_template.delete()
 
-    apply_batch_render_material_strategy(placed_obj, args.object_path)
+    apply_batch_render_material_strategy(placed_obj, paths["object_path"])
 
     anchor = bproc.object.create_primitive("CUBE")
     anchor.set_name("ANCHOR")
@@ -274,12 +290,12 @@ def main():
     bproc.renderer.enable_segmentation_output(map_by=["category_id", "instance", "name"])
     data = bproc.renderer.render()
     data = add_binary_mask_from_category_id(data, target_category_id=999)
-    bproc.writer.write_hdf5(args.output_dir, data)
+    bproc.writer.write_hdf5(paths["output_dir"], data)
 
     write_metadata(
-        output_dir=args.output_dir,
-        front_json=args.front_json,
-        object_path=args.object_path,
+        output_dir=paths["output_dir"],
+        front_json=paths["front_json"],
+        object_path=paths["object_path"],
         support_name=selected_support_name,
         surface_name=selected_surface_name,
         scale_factor=scale_factor,

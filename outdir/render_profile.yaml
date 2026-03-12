@@ -1,3 +1,10 @@
+paths:
+  front_json: /opt/data/private/dataset/3d-front/3D-FRONT/15060596-a24f-4f1e-abae-802e2a5d756b.json
+  future_model_dir: /opt/data/private/dataset/3d-front/3D-FUTURE-model/
+  front_texture_dir: /opt/data/private/dataset/3d-front/3D-FRONT-texture/
+  object_path: /opt/data/private/project/blender/objects/objaverse_lvis_real/0ba6d785c99c4a0eb7c7d0c793120c0e.glb
+  output_dir: ./output/
+
 material:
   type_sampling: weighted
   type: glass_clear

@@ -16,13 +16,14 @@ def _load_config():
     with open(CONFIG_PATH, "r", encoding="utf-8") as file:
         raw = yaml.safe_load(file) or {}
     return (
+        raw.get("paths", {}),
         raw.get("material", {}),
         raw.get("logic", {}),
         raw.get("render", {}),
     )
 
 
-MATERIAL_CONFIG, LOGIC_CONFIG, RENDER_CONFIG = _load_config()
+PATHS_CONFIG, MATERIAL_CONFIG, LOGIC_CONFIG, RENDER_CONFIG = _load_config()
 
 
 def generate_fibonacci_points(n_samples, radius, center_loc, hemisphere=True):
