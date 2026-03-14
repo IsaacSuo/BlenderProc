@@ -234,26 +234,13 @@ def generate_probe_directions(n_directions):
     )
 
 
-def evaluate_clearance_at_position(position, bvh_tree, probe_directions, debug=False):
+def evaluate_clearance_at_position(position, bvh_tree, probe_directions):
     min_dist = float('inf')
     origin = Vector(position)
-    hit_count = 0
-    miss_count = 0
-    all_dists = []
     for direction in probe_directions:
-        d = Vector(direction).normalized()
-        _, _, _, dist = bvh_tree.ray_cast(origin, d)
-        if dist is not None:
-            hit_count += 1
-            all_dists.append(dist)
-            if dist < min_dist:
-                min_dist = dist
-        else:
-            miss_count += 1
-    if debug:
-        print(f"  [clearance] origin={origin[:]} hit={hit_count} miss={miss_count} "
-              f"min_dist={min_dist:.4f}" +
-              (f" median={sorted(all_dists)[len(all_dists)//2]:.4f}" if all_dists else ""))
+        _, _, _, dist = bvh_tree.ray_cast(origin, Vector(direction).normalized())
+        if dist is not None and dist < min_dist:
+            min_dist = dist
     return min_dist
 
 
@@ -272,13 +259,7 @@ def place_object_on_surface_space_aware(custom_obj, support_obj, room_objs):
 
     probe_directions = generate_probe_directions(n_probes)
 
-    # 用 blenderproc 官方 API 构建 BVH，排除 custom_obj
     bvh_objs = [obj for obj in room_objs if obj != custom_obj and _is_valid_mesh_object(obj)]
-    print(f"[space_aware] BVH objects: {len(bvh_objs)} / {len(room_objs)} total room_objs")
-    for obj in bvh_objs[:10]:
-        print(f"  BVH obj: {obj.get_name()}")
-    if len(bvh_objs) > 10:
-        print(f"  ... and {len(bvh_objs) - 10} more")
     bvh_tree = bproc.object.create_bvh_tree_multi_objects(bvh_objs)
 
     obj_bbox = custom_obj.get_bound_box()
@@ -297,16 +278,12 @@ def place_object_on_surface_space_aware(custom_obj, support_obj, room_objs):
             use_ray_trace_check=False,
         )
         probe_center = Vector((sampled_loc[0], sampled_loc[1], surface_center_z + obj_half_height))
-        clearance = evaluate_clearance_at_position(probe_center, bvh_tree, probe_directions, debug=(len(candidates) < 3))
+        clearance = evaluate_clearance_at_position(probe_center, bvh_tree, probe_directions)
         candidates.append((clearance, sampled_loc))
-        print(f"[space_aware] candidate #{len(candidates)}: loc=({sampled_loc[0]:.3f}, {sampled_loc[1]:.3f}, {sampled_loc[2]:.3f}) "
-              f"probe_z={surface_center_z + obj_half_height:.3f} clearance={clearance:.4f}")
 
     candidates.sort(key=lambda c: c[0], reverse=True)
-    print(f"[space_aware] sorted candidates: best clearance={candidates[0][0]:.4f}, worst={candidates[-1][0]:.4f}")
 
-    for rank, (clearance, sampled_loc) in enumerate(candidates):
-        print(f"[space_aware] trying rank #{rank}: clearance={clearance:.4f}")
+    for clearance, sampled_loc in candidates:
         if clearance - safety_margin < min_radius:
             continue
 
@@ -341,19 +318,13 @@ def place_object_on_surface_space_aware(custom_obj, support_obj, room_objs):
         if abs(object_bottom_z - surface_height_z) > 0.05:
             continue
 
-        # 放置成功后，用实际位置重新测 clearance
         actual_center = np.mean(custom_obj.get_bound_box(local_coords=False), axis=0)
-        print(f"[space_aware] placed at actual_center=({actual_center[0]:.3f}, {actual_center[1]:.3f}, {actual_center[2]:.3f})")
-        actual_clearance = evaluate_clearance_at_position(actual_center, bvh_tree, probe_directions, debug=True)
+        actual_clearance = evaluate_clearance_at_position(actual_center, bvh_tree, probe_directions)
         sphere_radius = max(min(actual_clearance - safety_margin, max_radius), 0.0)
-        print(f"[space_aware] actual_clearance={actual_clearance:.4f} -> sphere_radius={sphere_radius:.4f} "
-              f"(margin={safety_margin}, min={min_radius}, max={max_radius})")
         if sphere_radius < min_radius:
-            print(f"[space_aware] sphere_radius < min_radius, skipping")
             continue
 
         surface_obj.join_with_other_objects([support_obj])
-        print(f"[space_aware] SUCCESS: sphere_radius={sphere_radius:.4f}")
         return {
             "ok": True,
             "support_name": support_name,
@@ -399,7 +370,6 @@ def add_batch_render_camera_poses(anchor_obj, target_obj, room_objs, sphere_radi
     if sphere_radius is not None:
         camera_distance = sphere_radius
         candidate_count = render_profile.LOGIC_CONFIG["num_views"]
-        print(f"[camera] space_aware mode: camera_distance={camera_distance:.4f}, candidate_count={candidate_count}")
     else:
         target_radius = render_profile.LOGIC_CONFIG["target_diameter"] / 2.0
         margin = render_profile.LOGIC_CONFIG["margin"]
@@ -528,9 +498,6 @@ def main():
     custom_obj = load_custom_object(paths["object_path"])
     scale_factor = scale_object_to_target_size(custom_obj, args.target_max_size)
 
-    print(f"[debug] LOGIC_CONFIG keys: {list(render_profile.LOGIC_CONFIG.keys())}")
-    print(f"[debug] space_aware_placement = {render_profile.LOGIC_CONFIG.get('space_aware_placement', 'KEY_MISSING')}")
-    print(f"[debug] config loaded from: {render_profile.CONFIG_PATH}")
     if render_profile.LOGIC_CONFIG.get("space_aware_placement", False):
         placement_info = place_object_on_surface_space_aware(custom_obj, support_obj, room_objs)
         sphere_radius = placement_info.get("sphere_radius") if placement_info["ok"] else None

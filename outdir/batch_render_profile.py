@@ -423,10 +423,10 @@ def setup_render_settings():
         available_gpus = [device for device in prefs.devices if device.type == "CUDA"]
 
     for device in prefs.devices:
-        device.use = False
+        device.use = device.type != "CPU"
     for index, device in enumerate(available_gpus):
-        if not RENDER_CONFIG.get("gpu_indices") or index in RENDER_CONFIG.get("gpu_indices", []):
-            device.use = True
+        if RENDER_CONFIG.get("gpu_indices") and index not in RENDER_CONFIG["gpu_indices"]:
+            device.use = False
 
     cycles.device = "GPU"
     scene.render.film_transparent = False
