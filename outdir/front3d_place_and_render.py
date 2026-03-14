@@ -528,6 +528,9 @@ def main():
     custom_obj = load_custom_object(paths["object_path"])
     scale_factor = scale_object_to_target_size(custom_obj, args.target_max_size)
 
+    print(f"[debug] LOGIC_CONFIG keys: {list(render_profile.LOGIC_CONFIG.keys())}")
+    print(f"[debug] space_aware_placement = {render_profile.LOGIC_CONFIG.get('space_aware_placement', 'KEY_MISSING')}")
+    print(f"[debug] config loaded from: {render_profile.CONFIG_PATH}")
     if render_profile.LOGIC_CONFIG.get("space_aware_placement", False):
         placement_info = place_object_on_surface_space_aware(custom_obj, support_obj, room_objs)
         sphere_radius = placement_info.get("sphere_radius") if placement_info["ok"] else None
