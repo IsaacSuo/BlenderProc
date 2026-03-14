@@ -348,6 +348,14 @@ def place_object_on_surface_space_aware(custom_obj, support_obj, room_objs):
     return {"ok": False, "reason": "no_candidate_with_sufficient_clearance", "support_name": support_name}
 
 
+def _is_valid_mesh_object(obj):
+    try:
+        bl = getattr(obj, "blender_obj", None)
+        return bl is not None and bl.type == "MESH" and bl.data is not None
+    except ReferenceError:
+        return False
+
+
 def apply_batch_render_material_strategy(obj, object_path):
     material_params = render_profile.sample_material_params_for_object(object_path)
     obj.blender_obj["_material_params_json"] = json.dumps(material_params, ensure_ascii=False)
@@ -404,7 +412,7 @@ def add_batch_render_camera_poses(anchor_obj, target_obj, room_objs, sphere_radi
             "no_background": True,
         }
         bvh_tree = bproc.object.create_bvh_tree_multi_objects(
-            [obj for obj in room_objs if isinstance(obj, bproc.types.MeshObject)]
+            [obj for obj in room_objs if _is_valid_mesh_object(obj)]
         )
 
     accepted_views = 0
