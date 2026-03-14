@@ -381,7 +381,8 @@ def add_batch_render_camera_poses(anchor_obj, target_obj, room_objs, sphere_radi
 
     if sphere_radius is not None:
         camera_distance = sphere_radius
-        candidate_count = render_profile.LOGIC_CONFIG["num_views"]
+        candidate_count = render_profile.LOGIC_CONFIG["num_views"] * 3
+        focus_jitter *= 0.3
     else:
         target_radius = render_profile.LOGIC_CONFIG["target_diameter"] / 2.0
         margin = render_profile.LOGIC_CONFIG["margin"]
@@ -415,6 +416,12 @@ def add_batch_render_camera_poses(anchor_obj, target_obj, room_objs, sphere_radi
             [obj for obj in room_objs if _is_valid_mesh_object(obj)]
         )
 
+    inplane_rot_min = render_profile.LOGIC_CONFIG.get("inplane_rot_min_rad", -0.5)
+    inplane_rot_max = render_profile.LOGIC_CONFIG.get("inplane_rot_max_rad", 0.5)
+    if sphere_radius is not None:
+        inplane_rot_min *= 0.3
+        inplane_rot_max *= 0.3
+
     accepted_views = 0
     for pos_local in camera_positions_local:
         cam_obj.location = pos_local + anchor_obj.blender_obj.location
@@ -423,17 +430,15 @@ def add_batch_render_camera_poses(anchor_obj, target_obj, room_objs, sphere_radi
         toward_direction = focus_target - np.array(cam_obj.location)
         rotation_matrix = bproc.camera.rotation_from_forward_vec(
             toward_direction,
-            inplane_rot=np.random.uniform(
-                render_profile.LOGIC_CONFIG.get("inplane_rot_min_rad", -0.5),
-                render_profile.LOGIC_CONFIG.get("inplane_rot_max_rad", 0.5),
-            ),
+            inplane_rot=np.random.uniform(inplane_rot_min, inplane_rot_max),
         )
         cam2world_matrix = bproc.math.build_transformation_mat(np.array(cam_obj.location), rotation_matrix)
 
         if sphere_radius is None:
             if not bproc.camera.perform_obstacle_in_view_check(cam2world_matrix, proximity_checks, bvh_tree):
                 continue
-        if target_obj not in bproc.camera.visible_objects(cam2world_matrix, sqrt_number_of_rays=20):
+        visibility_rays = 10 if sphere_radius is not None else 20
+        if target_obj not in bproc.camera.visible_objects(cam2world_matrix, sqrt_number_of_rays=visibility_rays):
             continue
 
         bproc.camera.add_camera_pose(np.array(cam2world_matrix))
