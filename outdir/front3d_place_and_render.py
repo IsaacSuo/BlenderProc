@@ -244,25 +244,6 @@ def evaluate_clearance_at_position(position, bvh_tree, probe_directions):
     return min_dist
 
 
-def _build_bvh_tree_excluding(room_objs, exclude_obj):
-    bm = bmesh.new()
-    for obj in room_objs:
-        if obj == exclude_obj:
-            continue
-        bl_obj = getattr(obj, "blender_obj", None)
-        if bl_obj is None or bl_obj.type != "MESH" or bl_obj.data is None:
-            continue
-        offset = len(bm.verts)
-        bm.from_mesh(bl_obj.data)
-        new_verts = list(bm.verts)[offset:]
-        bmesh.ops.transform(bm, verts=new_verts, matrix=bl_obj.matrix_world)
-    bm.verts.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
-    tree = BVHTree.FromBMesh(bm)
-    bm.free()
-    return tree
-
-
 def place_object_on_surface_space_aware(custom_obj, support_obj, room_objs):
     logic = render_profile.LOGIC_CONFIG
     n_candidates = int(logic.get("placement_candidates", 20))
@@ -277,7 +258,10 @@ def place_object_on_surface_space_aware(custom_obj, support_obj, room_objs):
         return {"ok": False, "reason": "no_upward_surface_extracted", "support_name": support_name}
 
     probe_directions = generate_probe_directions(n_probes)
-    bvh_tree = _build_bvh_tree_excluding(room_objs, custom_obj)
+
+    # 用 blenderproc 官方 API 构建 BVH，排除 custom_obj
+    bvh_objs = [obj for obj in room_objs if obj != custom_obj and _is_valid_mesh_object(obj)]
+    bvh_tree = bproc.object.create_bvh_tree_multi_objects(bvh_objs)
 
     obj_bbox = custom_obj.get_bound_box()
     obj_extent = np.max(obj_bbox, axis=0) - np.min(obj_bbox, axis=0)
@@ -301,8 +285,7 @@ def place_object_on_surface_space_aware(custom_obj, support_obj, room_objs):
     candidates.sort(key=lambda c: c[0], reverse=True)
 
     for clearance, sampled_loc in candidates:
-        sphere_radius = max(min(clearance - safety_margin, max_radius), 0.0)
-        if sphere_radius < min_radius:
+        if clearance - safety_margin < min_radius:
             continue
 
         def sample_pose(obj):
@@ -334,6 +317,13 @@ def place_object_on_surface_space_aware(custom_obj, support_obj, room_objs):
         surface_name = surface_obj.get_name()
 
         if abs(object_bottom_z - surface_height_z) > 0.05:
+            continue
+
+        # 放置成功后，用实际位置重新测 clearance
+        actual_center = np.mean(custom_obj.get_bound_box(local_coords=False), axis=0)
+        actual_clearance = evaluate_clearance_at_position(actual_center, bvh_tree, probe_directions)
+        sphere_radius = max(min(actual_clearance - safety_margin, max_radius), 0.0)
+        if sphere_radius < min_radius:
             continue
 
         surface_obj.join_with_other_objects([support_obj])
@@ -381,8 +371,7 @@ def add_batch_render_camera_poses(anchor_obj, target_obj, room_objs, sphere_radi
 
     if sphere_radius is not None:
         camera_distance = sphere_radius
-        candidate_count = render_profile.LOGIC_CONFIG["num_views"] * 3
-        focus_jitter *= 0.3
+        candidate_count = render_profile.LOGIC_CONFIG["num_views"]
     else:
         target_radius = render_profile.LOGIC_CONFIG["target_diameter"] / 2.0
         margin = render_profile.LOGIC_CONFIG["margin"]
@@ -416,12 +405,6 @@ def add_batch_render_camera_poses(anchor_obj, target_obj, room_objs, sphere_radi
             [obj for obj in room_objs if _is_valid_mesh_object(obj)]
         )
 
-    inplane_rot_min = render_profile.LOGIC_CONFIG.get("inplane_rot_min_rad", -0.5)
-    inplane_rot_max = render_profile.LOGIC_CONFIG.get("inplane_rot_max_rad", 0.5)
-    if sphere_radius is not None:
-        inplane_rot_min *= 0.3
-        inplane_rot_max *= 0.3
-
     accepted_views = 0
     for pos_local in camera_positions_local:
         cam_obj.location = pos_local + anchor_obj.blender_obj.location
@@ -430,15 +413,17 @@ def add_batch_render_camera_poses(anchor_obj, target_obj, room_objs, sphere_radi
         toward_direction = focus_target - np.array(cam_obj.location)
         rotation_matrix = bproc.camera.rotation_from_forward_vec(
             toward_direction,
-            inplane_rot=np.random.uniform(inplane_rot_min, inplane_rot_max),
+            inplane_rot=np.random.uniform(
+                render_profile.LOGIC_CONFIG.get("inplane_rot_min_rad", -0.5),
+                render_profile.LOGIC_CONFIG.get("inplane_rot_max_rad", 0.5),
+            ),
         )
         cam2world_matrix = bproc.math.build_transformation_mat(np.array(cam_obj.location), rotation_matrix)
 
         if sphere_radius is None:
             if not bproc.camera.perform_obstacle_in_view_check(cam2world_matrix, proximity_checks, bvh_tree):
                 continue
-        visibility_rays = 10 if sphere_radius is not None else 20
-        if target_obj not in bproc.camera.visible_objects(cam2world_matrix, sqrt_number_of_rays=visibility_rays):
+        if target_obj not in bproc.camera.visible_objects(cam2world_matrix, sqrt_number_of_rays=20):
             continue
 
         bproc.camera.add_camera_pose(np.array(cam2world_matrix))
