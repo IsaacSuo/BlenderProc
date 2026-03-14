@@ -109,6 +109,22 @@ logic:
   lens: 50
   master_seed: 0
   use_physics: false
+  candidate_view_multiplier: 6
+  elevation_min_deg: 15
+  elevation_max_deg: 75
+  inplane_rot_min_rad: -0.5
+  inplane_rot_max_rad: 0.5
+  focus_jitter_factor: 0.15
+  proximity_min_factor: 0.6
+  proximity_avg_min_factor: 1.0
+  proximity_avg_max_factor: 0.9
+  # 空间感知放置
+  space_aware_placement: true
+  placement_candidates: 20
+  probe_directions: 60
+  sphere_safety_margin: 0.15
+  min_sphere_radius: 0.5
+  max_sphere_radius: 3.0
 
 render:
   engine: CYCLES
