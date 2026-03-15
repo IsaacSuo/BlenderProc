@@ -48,35 +48,39 @@ def main():
     results = []
     errors = 0
 
-    for i, jf in enumerate(json_files):
+    def run_one(index_and_jf):
+        i, jf = index_and_jf
         json_path = os.path.join(front_json_dir, jf)
         cmd = ["blenderproc", "run", script_path, json_path, future_model_dir, front_texture_dir, object_path]
         if args.support_keywords:
             cmd += ["--support-keywords"] + args.support_keywords
         if args.target_max_size is not None:
             cmd += ["--target-max-size", str(args.target_max_size)]
-
-        print(f"[{i+1}/{len(json_files)}] {jf} ...", end=" ", flush=True)
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            result_line = None
             for line in proc.stdout.splitlines():
                 if line.startswith("PRECOMPUTE_RESULT:"):
-                    result_line = line[len("PRECOMPUTE_RESULT:"):]
-            if result_line:
-                data = json.loads(result_line)
+                    data = json.loads(line[len("PRECOMPUTE_RESULT:"):])
+                    return i, jf, data, None
+            return i, jf, None, "no result"
+        except subprocess.TimeoutExpired:
+            return i, jf, None, "timeout"
+        except Exception as e:
+            return i, jf, None, str(e)
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    total = len(json_files)
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = {pool.submit(run_one, (i, jf)): jf for i, jf in enumerate(json_files)}
+        for future in as_completed(futures):
+            i, jf, data, err = future.result()
+            if data:
                 results.append(data)
                 r = data.get("sphere_radius", "N/A")
-                print(f"sphere_radius={r}")
+                print(f"[{len(results)+errors}/{total}] {jf} -> sphere_radius={r}")
             else:
                 errors += 1
-                print("FAILED (no result)")
-        except subprocess.TimeoutExpired:
-            errors += 1
-            print("TIMEOUT")
-        except Exception as e:
-            errors += 1
-            print(f"ERROR: {e}")
+                print(f"[{len(results)+errors}/{total}] {jf} -> {err}")
 
     # Sort by sphere_radius descending
     results.sort(key=lambda r: r.get("sphere_radius", 0), reverse=True)
