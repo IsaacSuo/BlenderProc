@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument(
         "--target-max-size",
         type=float,
-        default=0.45,
+        default=0.20,
         help="Scale the custom object so its largest bbox dimension matches this size in meters.",
     )
     return parser.parse_args()
@@ -514,6 +514,28 @@ def main():
             f"{support_name} ({placement_info['reason']})"
         )
 
+    if sphere_radius is not None:
+        surface_z = float(np.min(custom_obj.get_bound_box(local_coords=False), axis=0)[2])
+        target_diameter = float(render_profile.LOGIC_CONFIG["target_diameter"])
+        margin = float(render_profile.LOGIC_CONFIG["margin"])
+        cam_data = bpy.data.cameras.get("UltraCam") or bpy.data.cameras.new("UltraCam")
+        cam_data.lens = render_profile.LOGIC_CONFIG["lens"]
+        fov_h = cam_data.angle
+        aspect_ratio = render_profile.RENDER_CONFIG["res_x"] / render_profile.RENDER_CONFIG["res_y"]
+        fov_v = 2 * math.atan(math.tan(fov_h / 2) / aspect_ratio)
+        ideal_diameter = 2 * sphere_radius * math.sin(min(fov_h, fov_v) / 2) / margin
+        current_bbox = custom_obj.get_bound_box()
+        current_size = float(np.max(np.max(current_bbox, axis=0) - np.min(current_bbox, axis=0)))
+        if current_size > 0:
+            rescale = ideal_diameter / current_size
+            custom_obj.set_scale(np.array(custom_obj.blender_obj.scale) * rescale)
+            custom_obj.persist_transformation_into_mesh(location=False, rotation=False, scale=True)
+            scale_factor *= rescale
+            new_bottom_z = float(np.min(custom_obj.get_bound_box(local_coords=False), axis=0)[2])
+            loc = custom_obj.get_location()
+            loc[2] += surface_z - new_bottom_z
+            custom_obj.set_location(loc)
+
     apply_batch_render_material_strategy(custom_obj, paths["object_path"])
 
     anchor = bproc.object.create_primitive("CUBE")
@@ -526,9 +548,17 @@ def main():
     bproc.renderer.enable_depth_output(activate_antialiasing=False)
     bproc.renderer.enable_normals_output()
     bproc.renderer.enable_segmentation_output(map_by=["category_id", "instance", "name"])
-    data = bproc.renderer.render()
-    data = add_binary_mask_from_category_id(data, target_category_id=999)
-    bproc.writer.write_hdf5(paths["output_dir"], data)
+
+    scene = bpy.context.scene
+    total_frames = scene.frame_end
+    for frame_idx in range(total_frames):
+        scene.frame_start = frame_idx
+        scene.frame_end = frame_idx + 1
+        data = bproc.renderer.render()
+        data = add_binary_mask_from_category_id(data, target_category_id=999)
+        bproc.writer.write_hdf5(paths["output_dir"], data, append_to_existing_output=True)
+    scene.frame_start = 0
+    scene.frame_end = total_frames
 
     write_metadata(
         output_dir=paths["output_dir"],
