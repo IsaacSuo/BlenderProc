@@ -549,16 +549,9 @@ def main():
     bproc.renderer.enable_normals_output()
     bproc.renderer.enable_segmentation_output(map_by=["category_id", "instance", "name"])
 
-    scene = bpy.context.scene
-    total_frames = scene.frame_end
-    for frame_idx in range(total_frames):
-        scene.frame_start = frame_idx
-        scene.frame_end = frame_idx + 1
-        data = bproc.renderer.render()
-        data = add_binary_mask_from_category_id(data, target_category_id=999)
-        bproc.writer.write_hdf5(paths["output_dir"], data, append_to_existing_output=True)
-    scene.frame_start = 0
-    scene.frame_end = total_frames
+    data = bproc.renderer.render()
+    data = add_binary_mask_from_category_id(data, target_category_id=999)
+    bproc.writer.write_hdf5(paths["output_dir"], data)
 
     write_metadata(
         output_dir=paths["output_dir"],
