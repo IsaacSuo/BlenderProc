@@ -134,19 +134,20 @@ def blender_clean_up():
         bpy.data.lights.remove(light)
 
 
-def process_one_scene(json_path, args, mapping, probe_directions, logic, obj_half_height):
+def process_one_scene(json_path, future_model_dir, front_texture_dir, support_keywords,
+                      mapping, probe_directions, logic, obj_half_height):
     """Process a single scene, return result dict or None."""
     try:
         room_objs = bproc.loader.load_front3d(
             json_path=json_path,
-            future_model_path=args.future_model_dir,
-            front_3D_texture_path=args.front_texture_dir,
+            future_model_path=future_model_dir,
+            front_3D_texture_path=front_texture_dir,
             label_mapping=mapping,
         )
     except Exception as e:
         return {"front_json": os.path.basename(json_path), "error": str(e)[:80]}
 
-    support_candidates = find_support_candidates(room_objs, args.support_keywords)
+    support_candidates = find_support_candidates(room_objs, support_keywords)
 
     best_result = None
     for support_obj in support_candidates:
@@ -202,8 +203,9 @@ def main():
     errors = 0
 
     for i, jf in enumerate(json_files):
-        json_path = os.path.join(args.front_json_dir, jf)
-        result = process_one_scene(json_path, args, mapping, probe_directions, logic, obj_half_height)
+        json_path = os.path.join(front_json_dir, jf)
+        result = process_one_scene(json_path, future_model_dir, front_texture_dir,
+                                   args.support_keywords, mapping, probe_directions, logic, obj_half_height)
         results.append(result)
 
         r = result.get("sphere_radius", None)
