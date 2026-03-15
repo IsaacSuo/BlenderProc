@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument(
         "--target-max-size",
         type=float,
-        default=0.20,
+        default=0.40,
         help="Scale the custom object so its largest bbox dimension matches this size in meters.",
     )
     return parser.parse_args()
