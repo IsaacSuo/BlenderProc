@@ -515,6 +515,8 @@ def main():
         best_info = None
         best_radius = -1.0
         for candidate_obj in support_candidates:
+            if not _is_valid_mesh_object(candidate_obj):
+                continue
             info = place_object_on_surface_space_aware(custom_obj, candidate_obj, room_objs)
             if info["ok"] and info.get("sphere_radius", 0) > best_radius:
                 best_info = info
@@ -526,6 +528,8 @@ def main():
 
     if placement_info is None:
         for candidate_obj in support_candidates:
+            if not _is_valid_mesh_object(candidate_obj):
+                continue
             info = place_object_on_surface(custom_obj, candidate_obj)
             if info["ok"]:
                 placement_info = info
@@ -535,10 +539,7 @@ def main():
 
     if placement_info is None:
         custom_obj.delete()
-        raise RuntimeError(
-            f"Failed to place the custom object on any support object. "
-            f"Tried: {', '.join(c.get_name() for c in support_candidates)}"
-        )
+        raise RuntimeError("Failed to place the custom object on any support object.")
 
     if sphere_radius is not None:
         surface_z = float(np.min(custom_obj.get_bound_box(local_coords=False), axis=0)[2])
