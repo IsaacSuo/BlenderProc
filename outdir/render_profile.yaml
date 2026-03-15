@@ -105,7 +105,7 @@ logic:
   num_views: 10
   use_hemisphere: true
   target_diameter: 1.0
-  margin: 1.4
+  margin: 1.2
   lens: 50
   master_seed: 0
   use_physics: false
