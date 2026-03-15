@@ -504,26 +504,40 @@ def main():
     if not support_candidates:
         raise RuntimeError(f"No support object found. Keywords tried: {', '.join(args.support_keywords)}")
 
-    support_obj = support_candidates[0]
-    support_name = support_obj.get_name()
-
     custom_obj = load_custom_object(paths["object_path"])
     scale_factor = scale_object_to_target_size(custom_obj, args.target_max_size)
 
-    if render_profile.LOGIC_CONFIG.get("space_aware_placement", False):
-        placement_info = place_object_on_surface_space_aware(custom_obj, support_obj, room_objs)
-        sphere_radius = placement_info.get("sphere_radius") if placement_info["ok"] else None
-        placement_mode = "space_aware"
-    else:
-        placement_info = place_object_on_surface(custom_obj, support_obj)
-        sphere_radius = None
-        placement_mode = "traditional"
+    placement_info = None
+    sphere_radius = None
+    placement_mode = "traditional"
 
-    if not placement_info["ok"]:
+    if render_profile.LOGIC_CONFIG.get("space_aware_placement", False):
+        best_info = None
+        best_radius = -1.0
+        for candidate_obj in support_candidates:
+            info = place_object_on_surface_space_aware(custom_obj, candidate_obj, room_objs)
+            if info["ok"] and info.get("sphere_radius", 0) > best_radius:
+                best_info = info
+                best_radius = info["sphere_radius"]
+        if best_info is not None:
+            placement_info = best_info
+            sphere_radius = best_radius
+            placement_mode = "space_aware"
+
+    if placement_info is None:
+        for candidate_obj in support_candidates:
+            info = place_object_on_surface(custom_obj, candidate_obj)
+            if info["ok"]:
+                placement_info = info
+                sphere_radius = None
+                placement_mode = "traditional_fallback" if render_profile.LOGIC_CONFIG.get("space_aware_placement", False) else "traditional"
+                break
+
+    if placement_info is None:
         custom_obj.delete()
         raise RuntimeError(
-            f"Failed to place the custom object on selected support object: "
-            f"{support_name} ({placement_info['reason']})"
+            f"Failed to place the custom object on any support object. "
+            f"Tried: {', '.join(c.get_name() for c in support_candidates)}"
         )
 
     if sphere_radius is not None:
