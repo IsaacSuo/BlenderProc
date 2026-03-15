@@ -281,22 +281,15 @@ def place_object_on_surface_space_aware(custom_obj, support_obj, room_objs):
 
     candidates = []
     for _ in range(n_candidates):
-        try:
-            sampled_loc = bproc.sampler.upper_region(
-                objects_to_sample_on=[surface_obj],
-                min_height=0.2,
-                max_height=0.8,
-                use_ray_trace_check=False,
-            )
-        except Exception:
-            continue
+        sampled_loc = bproc.sampler.upper_region(
+            objects_to_sample_on=[surface_obj],
+            min_height=0.2,
+            max_height=0.8,
+            use_ray_trace_check=False,
+        )
         probe_center = Vector((sampled_loc[0], sampled_loc[1], surface_center_z + obj_half_height))
         clearance = evaluate_clearance_at_position(probe_center, bvh_tree, probe_directions)
         candidates.append((clearance, sampled_loc))
-
-    if not candidates:
-        surface_obj.join_with_other_objects([support_obj])
-        return {"ok": False, "reason": "upper_region_sampling_failed", "support_name": support_name}
 
     candidates.sort(key=lambda c: c[0], reverse=True)
 

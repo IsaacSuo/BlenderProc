@@ -65,12 +65,15 @@ def upper_region(objects_to_sample_on: Union[MeshObject, List[MeshObject]],
         """ Calculates the two vectors, which lie in the plane of the face and the normal of the face.
 
         :param face: Four corner coordinates of a face. Type: [4x[3xfloat]].
-        :return: (two vectors in the plane), and the normal.
+        :return: (two vectors in the plane), and the normal. Normal is None for degenerate faces.
         """
         vec1 = face[1] - face[0]
         vec2 = face[3] - face[0]
         normal = np.cross(vec1, vec2)
-        normal /= np.linalg.norm(normal)
+        norm_len = np.linalg.norm(normal)
+        if norm_len < 1e-10:
+            return (vec1, vec2), None
+        normal /= norm_len
         return (vec1, vec2), normal
 
     # determine for each object in objects the region, where to sample on
@@ -89,7 +92,9 @@ def upper_region(objects_to_sample_on: Union[MeshObject, List[MeshObject]],
         for face in faces:
             # calc the normal of all faces
             _, normal = calc_vec_and_normals(face)
-            diff_angle = math.acos(normal.dot(upper_dir))
+            if normal is None:
+                continue
+            diff_angle = math.acos(max(-1.0, min(1.0, normal.dot(upper_dir))))
             if diff_angle < min_diff_angle:
                 min_diff_angle = diff_angle
                 selected_face = face
