@@ -4,6 +4,7 @@ import importlib.util
 import json
 import math
 import os
+import random
 from pathlib import Path
 
 import bpy
@@ -51,10 +52,19 @@ def parse_args():
     return parser.parse_args()
 
 
-def resolve_runtime_paths(args):
+def resolve_runtime_paths(args, rng):
     config_paths = render_profile.PATHS_CONFIG
+    front_json = args.front_json or config_paths.get("front_json")
+    if not front_json:
+        front_json_dir = config_paths.get("front_json_dir")
+        if not front_json_dir or not os.path.isdir(front_json_dir):
+            raise ValueError("Must provide front_json (file) or front_json_dir (directory) in config")
+        json_files = sorted([f for f in os.listdir(front_json_dir) if f.endswith(".json")])
+        if not json_files:
+            raise FileNotFoundError(f"No .json files found in {front_json_dir}")
+        front_json = os.path.join(front_json_dir, rng.choice(json_files))
     resolved = {
-        "front_json": args.front_json or config_paths.get("front_json"),
+        "front_json": front_json,
         "future_model_dir": args.future_model_dir or config_paths.get("future_model_dir"),
         "front_texture_dir": args.front_texture_dir or config_paths.get("front_texture_dir"),
         "object_path": args.object_path or config_paths.get("object_path"),
@@ -464,7 +474,9 @@ def write_metadata(
 
 def main():
     args = parse_args()
-    paths = resolve_runtime_paths(args)
+    master_seed = int(render_profile.LOGIC_CONFIG.get("master_seed", 0))
+    rng = random.Random(master_seed if master_seed != 0 else None)
+    paths = resolve_runtime_paths(args, rng)
     validate_paths(paths)
     os.makedirs(paths["output_dir"], exist_ok=True)
 
