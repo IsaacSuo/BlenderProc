@@ -1,11 +1,9 @@
-"""Pre-scan script: find Top-K placement positions per 3D-FRONT scene.
-
-Usage:
-    blenderproc run outdir/prescan_placements.py --batch 0
-    blenderproc run outdir/prescan_placements.py --batch 1 --batch-size 500
-    blenderproc run outdir/prescan_placements.py --batch 0 --batch-size 3  # quick test
-"""
-import blenderproc as bproc
+import blenderproc as bproc  # must be first import for blenderproc run
+# Pre-scan script: find Top-K placement positions per 3D-FRONT scene.
+# Usage:
+#   blenderproc run outdir/prescan_placements.py --batch 0
+#   blenderproc run outdir/prescan_placements.py --batch 1 --batch-size 500
+#   blenderproc run outdir/prescan_placements.py --batch 0 --batch-size 3  # quick test
 import argparse
 import csv
 import importlib.util
