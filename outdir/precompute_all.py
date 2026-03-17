@@ -24,7 +24,6 @@ def main():
     parser.add_argument("--future-model-dir", default=None)
     parser.add_argument("--front-texture-dir", default=None)
     parser.add_argument("--object-path", default=None)
-    parser.add_argument("--support-keywords", nargs="+", default=None)
     parser.add_argument("--target-max-size", type=float, default=None)
     parser.add_argument("--workers", type=int, default=1, help="Number of parallel workers.")
     args = parser.parse_args()
@@ -52,8 +51,6 @@ def main():
         i, jf = index_and_jf
         json_path = os.path.join(front_json_dir, jf)
         cmd = ["blenderproc", "run", script_path, json_path, future_model_dir, front_texture_dir, object_path]
-        if args.support_keywords:
-            cmd += ["--support-keywords"] + args.support_keywords
         if args.target_max_size is not None:
             cmd += ["--target-max-size", str(args.target_max_size)]
         try:

@@ -28,27 +28,37 @@ render_profile = load_render_profile()
 def parse_args():
     parser = argparse.ArgumentParser(description="Batch precompute sphere_radius for all 3D-FRONT scenes.")
     parser.add_argument("--output-csv", default="sphere_radius_report.csv")
-    parser.add_argument("--support-keywords", nargs="+", default=["bed", "table", "desk"])
     parser.add_argument("--target-max-size", type=float, default=0.40)
     return parser.parse_args()
 
 
-def find_support_candidates(room_objs, keywords):
-    lowered = [k.lower() for k in keywords]
+# 从 front3d_place_and_render 导入白名单（保持单一数据源）
+def _load_support_ids():
+    spec = importlib.util.spec_from_file_location(
+        "front3d_place_and_render",
+        Path(__file__).with_name("front3d_place_and_render.py"),
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.SUPPORT_CATEGORY_IDS, mod._SUPPORT_PRIORITY
+
+_SUPPORT_CATEGORY_IDS, _SUPPORT_PRIORITY = _load_support_ids()
+
+
+def find_support_candidates(room_objs):
     candidates = []
     for obj in room_objs:
-        name = obj.get_name().lower()
-        matched_priority = None
-        for priority, keyword in enumerate(lowered):
-            if keyword in name:
-                matched_priority = priority
-                break
-        if matched_priority is None:
+        try:
+            cat_id = obj.get_cp("category_id")
+        except Exception:
             continue
+        if cat_id not in _SUPPORT_CATEGORY_IDS:
+            continue
+        priority = _SUPPORT_PRIORITY[cat_id]
         bbox = obj.get_bound_box()
         extent = np.max(bbox, axis=0) - np.min(bbox, axis=0)
         area = float(extent[0] * extent[1])
-        candidates.append((matched_priority, -area, obj))
+        candidates.append((priority, -area, obj))
     candidates.sort(key=lambda item: (item[0], item[1]))
     return [obj for _, _, obj in candidates]
 
@@ -134,7 +144,7 @@ def blender_clean_up():
         bpy.data.lights.remove(light)
 
 
-def process_one_scene(json_path, future_model_dir, front_texture_dir, support_keywords,
+def process_one_scene(json_path, future_model_dir, front_texture_dir,
                       mapping, probe_directions, logic, obj_half_height):
     """Process a single scene, return result dict or None."""
     try:
@@ -147,7 +157,7 @@ def process_one_scene(json_path, future_model_dir, front_texture_dir, support_ke
     except Exception as e:
         return {"front_json": os.path.basename(json_path), "error": str(e)[:80]}
 
-    support_candidates = find_support_candidates(room_objs, support_keywords)
+    support_candidates = find_support_candidates(room_objs)
 
     best_result = None
     for support_obj in support_candidates:
@@ -205,7 +215,7 @@ def main():
     for i, jf in enumerate(json_files):
         json_path = os.path.join(front_json_dir, jf)
         result = process_one_scene(json_path, future_model_dir, front_texture_dir,
-                                   args.support_keywords, mapping, probe_directions, logic, obj_half_height)
+                                   mapping, probe_directions, logic, obj_half_height)
         results.append(result)
 
         r = result.get("sphere_radius", None)

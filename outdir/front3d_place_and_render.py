@@ -28,6 +28,64 @@ def load_render_profile():
 render_profile = load_render_profile()
 
 
+# 3D-FRONT category_id 白名单：适合放置物体的平面
+# 按优先级分三梯队，梯队内按面积降序排列
+SUPPORT_CATEGORY_IDS = {
+    # --- 第一梯队：桌/床/柜顶面（大面积水平面）---
+    36,   # table
+    68,   # dining table
+    3,    # tea table
+    81,   # desk
+    80,   # dressing table
+    72,   # corner/side table
+    12,   # round end table
+    17,   # bed
+    67,   # double bed
+    70,   # single bed
+    20,   # kids bed
+    87,   # bunk bed
+    88,   # bed frame
+    76,   # nightstand
+    56,   # tv stand
+    28,   # sideboard / side cabinet / console
+    74,   # shelf
+    69,   # cabinet/shelf/desk
+    48,   # cabinet
+    6,    # children cabinet
+    47,   # kitchen cabinet
+    55,   # drawer chest / corner cabinet
+    91,   # bookcase / jewelry armoire
+    22,   # storage unit
+    23,   # media unit
+    84,   # wardrobe
+    65,   # wine cooler
+    # --- 第二梯队：沙发/椅类（可放但面积较小或曲面）---
+    46,   # sofa
+    18,   # two-seat sofa
+    89,   # three-seat / multi-person sofa
+    96,   # l-shaped sofa
+    9,    # chaise longue sofa
+    10,   # lazy sofa
+    16,   # armchair
+    50,   # chair
+    14,   # dining chair
+    78,   # lounge chair / book-chair / computer chair
+    71,   # classic chinese chair
+    83,   # dressing chair
+    94,   # barstool
+    35,   # pier/stool
+    25,   # footstool / sofastool / bed end stool / stool
+    66,   # outdoor furniture
+    # --- 第三梯队：地面 ---
+    51,   # floor
+}
+
+# category_id → 优先级（数值越小越优先）
+_SUPPORT_PRIORITY = {}
+for _prio, _cid in enumerate(SUPPORT_CATEGORY_IDS):
+    _SUPPORT_PRIORITY[_cid] = _prio
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Place a single-mesh custom object into a 3D-FRONT room and render it from sampled cameras."
@@ -37,12 +95,6 @@ def parse_args():
     parser.add_argument("front_texture_dir", nargs="?", help="Path to the 3D-FRONT-texture directory.")
     parser.add_argument("object_path", nargs="?", help="Path to the custom object file.")
     parser.add_argument("output_dir", nargs="?", help="Path to the output directory.")
-    parser.add_argument(
-        "--support-keywords",
-        nargs="+",
-        default=["bed", "table", "desk"],
-        help="Ordered object name keywords used to rank support objects.",
-    )
     parser.add_argument(
         "--target-max-size",
         type=float,
@@ -82,22 +134,20 @@ def validate_paths(paths):
             raise FileNotFoundError(path)
 
 
-def find_support_candidates(room_objs, keywords):
-    lowered = [keyword.lower() for keyword in keywords]
+def find_support_candidates(room_objs):
     candidates = []
     for obj in room_objs:
-        name = obj.get_name().lower()
-        matched_priority = None
-        for priority, keyword in enumerate(lowered):
-            if keyword in name:
-                matched_priority = priority
-                break
-        if matched_priority is None:
+        try:
+            cat_id = obj.get_cp("category_id")
+        except Exception:
             continue
+        if cat_id not in SUPPORT_CATEGORY_IDS:
+            continue
+        priority = _SUPPORT_PRIORITY[cat_id]
         bbox = obj.get_bound_box()
         extent = np.max(bbox, axis=0) - np.min(bbox, axis=0)
         horizontal_area = float(extent[0] * extent[1])
-        candidates.append((matched_priority, -horizontal_area, obj))
+        candidates.append((priority, -horizontal_area, obj))
     candidates.sort(key=lambda item: (item[0], item[1]))
     return [obj for _, _, obj in candidates]
 
@@ -500,9 +550,9 @@ def main():
         label_mapping=mapping,
     )
 
-    support_candidates = find_support_candidates(room_objs, args.support_keywords)
+    support_candidates = find_support_candidates(room_objs)
     if not support_candidates:
-        raise RuntimeError(f"No support object found. Keywords tried: {', '.join(args.support_keywords)}")
+        raise RuntimeError("No support object found matching SUPPORT_CATEGORY_IDS whitelist.")
 
     custom_obj = load_custom_object(paths["object_path"])
     scale_factor = scale_object_to_target_size(custom_obj, args.target_max_size)
