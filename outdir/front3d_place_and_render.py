@@ -548,7 +548,12 @@ def main():
         future_model_path=paths["future_model_dir"],
         front_3D_texture_path=paths["front_texture_dir"],
         label_mapping=mapping,
+        lamp_light_strength=0,  # disable built-in emission; lamp_lighting module handles it
     )
+
+    # Apply real lights for lamp objects
+    import lamp_lighting
+    lamp_lighting.apply_lighting_to_scene(room_objs, paths["front_json"])
 
     support_candidates = find_support_candidates(room_objs)
     if not support_candidates:

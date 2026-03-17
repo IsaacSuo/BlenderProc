@@ -1,0 +1,33 @@
+defaults:
+  light_type: POINT
+  energy: 100.0
+  color: [1.0, 0.95, 0.9]       # warm white
+  radius: 0.1                    # shadow_soft_size
+  offset: [0.0, -0.15, 0.0]     # offset from bbox center (Blender coords, Z-up)
+  keep_emission: true            # also keep emissive material
+  emission_strength: 3.0         # emissive material strength
+
+categories:
+  pendant_lamp:
+    light_type: POINT
+    energy: 150.0
+    offset: [0.0, -0.2, 0.0]    # bulb at the bottom of pendant
+    radius: 0.15
+
+  ceiling_lamp:
+    light_type: AREA
+    energy: 200.0
+    offset: [0.0, -0.05, 0.0]
+    radius: 0.3
+    area_size: [0.4, 0.4]
+
+  lighting:
+    light_type: POINT
+    energy: 80.0
+    offset: [0.0, -0.1, 0.0]
+
+models:
+  # Add per-model overrides here after tuning, e.g.:
+  # "06bb1295-131b-471a-8e97-66251b0f79fd":
+  #   energy: 120.0
+  #   offset: [0.0, -0.25, 0.0]
