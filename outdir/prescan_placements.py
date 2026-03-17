@@ -130,7 +130,10 @@ def scan_all_placements(room_objs, obj_half_height, probe_directions, logic, top
 
         support_name = obj.get_name()
 
-        surface_obj = bproc.object.slice_faces_with_normals(obj)
+        try:
+            surface_obj = bproc.object.slice_faces_with_normals(obj)
+        except Exception:
+            continue
         if surface_obj is None:
             continue
 
