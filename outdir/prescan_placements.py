@@ -291,32 +291,33 @@ def main():
     all_rows = []
     errors = 0
 
-    for i, jf in enumerate(batch_files):
-        json_path = os.path.join(front_json_dir, jf)
-        rows = process_one_scene(
-            json_path, future_model_dir, front_texture_dir,
-            mapping, probe_directions, logic, obj_half_height, args.top_k,
-        )
-        all_rows.extend(rows)
-
-        # Progress log
-        if rows and rows[0].get("error"):
-            errors += 1
-            print(f"[{i+1}/{len(batch_files)}] {jf} -> ERROR: {rows[0]['error']}")
-        else:
-            best_r = rows[0]["sphere_radius"] if rows else "?"
-            n_viable = sum(1 for r in rows if r.get("viable"))
-            print(f"[{i+1}/{len(batch_files)}] {jf} -> top sphere_radius={best_r}, "
-                  f"{n_viable}/{len(rows)} viable")
-
-        blender_clean_up()
-
-    # Write CSV
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        for row in all_rows:
-            writer.writerow(row)
+        f.flush()
+
+        for i, jf in enumerate(batch_files):
+            json_path = os.path.join(front_json_dir, jf)
+            rows = process_one_scene(
+                json_path, future_model_dir, front_texture_dir,
+                mapping, probe_directions, logic, obj_half_height, args.top_k,
+            )
+            all_rows.extend(rows)
+            for row in rows:
+                writer.writerow(row)
+            f.flush()
+
+            # Progress log
+            if rows and rows[0].get("error"):
+                errors += 1
+                print(f"[{i+1}/{len(batch_files)}] {jf} -> ERROR: {rows[0]['error']}")
+            else:
+                best_r = rows[0]["sphere_radius"] if rows else "?"
+                n_viable = sum(1 for r in rows if r.get("viable"))
+                print(f"[{i+1}/{len(batch_files)}] {jf} -> top sphere_radius={best_r}, "
+                      f"{n_viable}/{len(rows)} viable")
+
+            blender_clean_up()
 
     print(f"\nDone. Processed {len(batch_files)} scenes, {errors} errors.")
     print(f"CSV: {csv_path} ({len(all_rows)} rows)")
