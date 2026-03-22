@@ -9,6 +9,7 @@ from pathlib import Path
 
 import bpy
 import numpy as np
+from mathutils import Vector
 
 
 def _load_module(name, path):
@@ -195,6 +196,48 @@ def maybe_rescale_to_sphere_radius(custom_obj, sphere_radius, scale_factor):
     return scale_factor * rescale
 
 
+def add_camera_poses_float_mode(anchor_obj, target_obj, sphere_radius):
+    render_profile.setup_render_settings()
+
+    scene = bpy.context.scene
+    cam_obj = render_profile.create_smart_camera(anchor_obj.blender_obj)
+    bproc.camera.set_intrinsics_from_blender_params(
+        lens=render_profile.LOGIC_CONFIG["lens"],
+        image_width=render_profile.RENDER_CONFIG["res_x"],
+        image_height=render_profile.RENDER_CONFIG["res_y"],
+    )
+
+    target_bbox = target_obj.get_bound_box()
+    target_location = np.mean(target_bbox, axis=0)
+
+    if sphere_radius is not None:
+        camera_distance = float(sphere_radius)
+    else:
+        target_radius = render_profile.LOGIC_CONFIG["target_diameter"] / 2.0
+        margin = render_profile.LOGIC_CONFIG["margin"]
+        fov_h = cam_obj.data.angle
+        aspect_ratio = scene.render.resolution_x / scene.render.resolution_y
+        fov_v = 2 * math.atan(math.tan(fov_h / 2) / aspect_ratio)
+        camera_distance = (target_radius * margin) / math.sin(min(fov_h, fov_v) / 2)
+
+    candidate_count = int(render_profile.LOGIC_CONFIG["num_views"])
+    camera_positions_local = render_profile.generate_fibonacci_points(
+        n_samples=candidate_count,
+        radius=camera_distance,
+        center_loc=Vector((0, 0, 0)),
+        hemisphere=render_profile.LOGIC_CONFIG["use_hemisphere"],
+    )
+
+    for pos_local in camera_positions_local:
+        cam_location = np.array(pos_local + anchor_obj.blender_obj.location, dtype=float)
+        toward_direction = target_location - cam_location
+        rotation_matrix = bproc.camera.rotation_from_forward_vec(toward_direction, inplane_rot=0.0)
+        cam2world_matrix = bproc.math.build_transformation_mat(cam_location, rotation_matrix)
+        bproc.camera.add_camera_pose(np.array(cam2world_matrix))
+
+    return candidate_count
+
+
 def add_camera_poses_with_fallback(anchor, custom_obj, room_objs, sphere_radius):
     try:
         return render_mod.add_batch_render_camera_poses(
@@ -259,7 +302,7 @@ def main():
     anchor.hide(True)
     anchor.set_location(np.mean(custom_obj.get_bound_box(), axis=0))
 
-    camera_count = add_camera_poses_with_fallback(anchor, custom_obj, room_objs, sphere_radius)
+    camera_count = add_camera_poses_float_mode(anchor, custom_obj, sphere_radius)
 
     bproc.renderer.enable_depth_output(activate_antialiasing=False)
     bproc.renderer.enable_normals_output()
