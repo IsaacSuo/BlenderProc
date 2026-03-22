@@ -138,8 +138,7 @@ def scan_all_placements(room_objs, obj_half_height, probe_directions, logic, top
     min_radius = float(logic.get("min_sphere_radius", 0.3))
     max_radius = float(logic.get("max_sphere_radius", 3.0))
 
-    scene_bvh_objs = [o for o in room_objs if is_valid_mesh_object(o)]
-    if not scene_bvh_objs:
+    if not any(is_valid_mesh_object(o) for o in room_objs):
         return []
 
     all_results = []
@@ -163,7 +162,11 @@ def scan_all_placements(room_objs, obj_half_height, probe_directions, logic, top
         if surface_obj is None:
             continue
 
-        support_excluded_bvh_objs = [o for o in scene_bvh_objs if o != obj]
+        # Recompute valid objects each iteration because join_with_other_objects() invalidates old references.
+        support_excluded_bvh_objs = [
+            o for o in room_objs
+            if o != obj and is_valid_mesh_object(o)
+        ]
         if not support_excluded_bvh_objs:
             surface_obj.join_with_other_objects([obj])
             continue
