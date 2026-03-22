@@ -1,3 +1,5 @@
+import blenderproc as bproc
+
 import argparse
 import csv
 import json
@@ -6,8 +8,6 @@ import random
 from collections import Counter
 from pathlib import Path
 from typing import List
-
-import blenderproc as bproc
 
 
 def parse_args():
