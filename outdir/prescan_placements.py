@@ -44,7 +44,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Pre-scan 3D-FRONT scenes: find top-K placement positions per scene."
     )
-    parser.add_argument("--batch", type=int, required=True, help="Batch index (0-based)")
+    parser.add_argument("--batch", type=int, default=None, help="Batch index (0-based)")
     parser.add_argument("--batch-size", type=int, default=1000, help="Scenes per batch")
     parser.add_argument("--output-dir", default="./prescan_output/", help="CSV output directory")
     parser.add_argument("--top-k", type=int, default=10, help="Top positions to keep per scene")
@@ -52,6 +52,12 @@ def parse_args():
                         help="Candidates per support surface (default: from LOGIC_CONFIG)")
     parser.add_argument("--target-max-size", type=float, default=0.40,
                         help="Assumed max object size for probe height")
+    parser.add_argument(
+        "--scene-names",
+        nargs="+",
+        default=None,
+        help="Optional list of scene json basenames to scan directly, bypassing batch slicing.",
+    )
     return parser.parse_args()
 
 
@@ -99,6 +105,28 @@ def blender_clean_up():
         bpy.data.lights.remove(light)
 
 
+def project_point_to_surface(surface_obj, world_point):
+    """Project a point vertically down onto the sliced support surface."""
+    local2world = np.array(surface_obj.get_local2world_mat())
+    world2local = np.linalg.inv(local2world)
+
+    point = np.array([float(world_point[0]), float(world_point[1]), float(world_point[2]), 1.0], dtype=float)
+    origin_local = world2local @ point
+    direction_local = world2local @ np.array([0.0, 0.0, -1.0, 0.0], dtype=float)
+
+    hit, location, _, _ = surface_obj.blender_obj.ray_cast(
+        Vector(origin_local[:3]),
+        Vector(direction_local[:3]).normalized(),
+        distance=1e6,
+    )
+    if not hit:
+        return None
+
+    hit_local = np.array([float(location[0]), float(location[1]), float(location[2]), 1.0], dtype=float)
+    hit_world = local2world @ hit_local
+    return np.array(hit_world[:3], dtype=float)
+
+
 # ---------------------------------------------------------------------------
 # Core scanning logic
 # ---------------------------------------------------------------------------
@@ -137,18 +165,24 @@ def scan_all_placements(room_objs, obj_half_height, probe_directions, logic, top
         if surface_obj is None:
             continue
 
-        surface_center_z = float(np.mean(surface_obj.get_bound_box(), axis=0)[2])
-
         for _ in range(n_candidates):
             try:
                 sampled_loc = bproc.sampler.upper_region(
                     objects_to_sample_on=[surface_obj],
-                    min_height=0.2, max_height=0.8, use_ray_trace_check=False,
+                    min_height=0.2, max_height=0.8, use_ray_trace_check=True,
                 )
             except Exception:
                 continue
 
-            probe_center = (sampled_loc[0], sampled_loc[1], surface_center_z + obj_half_height)
+            surface_hit = project_point_to_surface(surface_obj, sampled_loc)
+            if surface_hit is None:
+                continue
+
+            probe_center = (
+                float(surface_hit[0]),
+                float(surface_hit[1]),
+                float(surface_hit[2] + obj_half_height),
+            )
             clearance = evaluate_clearance_at_position(probe_center, bvh_tree, probe_directions)
             sphere_radius = max(min(clearance - safety_margin, max_radius), 0.0)
 
@@ -160,7 +194,7 @@ def scan_all_placements(room_objs, obj_half_height, probe_directions, logic, top
                 "pos_x": round(float(probe_center[0]), 4),
                 "pos_y": round(float(probe_center[1]), 4),
                 "pos_z": round(float(probe_center[2]), 4),
-                "surface_z": round(surface_center_z, 4),
+                "surface_z": round(float(surface_hit[2]), 4),
                 "viable": sphere_radius >= min_radius,
             })
 
@@ -257,17 +291,28 @@ def main():
     json_files = sorted([f for f in os.listdir(front_json_dir) if f.endswith(".json")])
     total_scenes = len(json_files)
 
-    # Batch slicing
-    start = args.batch * args.batch_size
-    end = min(start + args.batch_size, total_scenes)
-    if start >= total_scenes:
-        print(f"Batch {args.batch} is out of range (total {total_scenes} scenes, "
-              f"batch-size {args.batch_size}). Nothing to do.")
-        return
-    batch_files = json_files[start:end]
-
-    print(f"Total scenes: {total_scenes}")
-    print(f"Batch {args.batch}: scenes [{start}, {end}) — {len(batch_files)} scenes")
+    if args.scene_names:
+        scene_set = set(args.scene_names)
+        batch_files = [jf for jf in json_files if jf in scene_set]
+        missing = sorted(scene_set - set(batch_files))
+        if missing:
+            raise FileNotFoundError(f"Scene names not found: {missing[:5]}")
+        csv_name = "prescan_custom.csv"
+        print(f"Total scenes: {total_scenes}")
+        print(f"Custom scene subset: {len(batch_files)} scenes")
+    else:
+        if args.batch is None:
+            raise ValueError("--batch is required unless --scene-names is provided")
+        start = args.batch * args.batch_size
+        end = min(start + args.batch_size, total_scenes)
+        if start >= total_scenes:
+            print(f"Batch {args.batch} is out of range (total {total_scenes} scenes, "
+                  f"batch-size {args.batch_size}). Nothing to do.")
+            return
+        batch_files = json_files[start:end]
+        csv_name = f"prescan_batch_{args.batch:04d}.csv"
+        print(f"Total scenes: {total_scenes}")
+        print(f"Batch {args.batch}: scenes [{start}, {end}) — {len(batch_files)} scenes")
 
     # Init Blender
     bproc.init()
@@ -280,7 +325,7 @@ def main():
 
     # Prepare output
     os.makedirs(args.output_dir, exist_ok=True)
-    csv_path = os.path.join(args.output_dir, f"prescan_batch_{args.batch:04d}.csv")
+    csv_path = os.path.join(args.output_dir, csv_name)
     fieldnames = [
         "front_json", "rank", "support_name", "category_id",
         "sphere_radius", "clearance",
