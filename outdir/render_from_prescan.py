@@ -165,9 +165,32 @@ def place_object_with_fixed_location(custom_obj, support_obj, placement):
     pos_x = _safe_float(placement["pos_x"], "pos_x")
     pos_y = _safe_float(placement["pos_y"], "pos_y")
     surface_z = _safe_float(placement["surface_z"], "surface_z")
+    sampled_loc = np.array((pos_x, pos_y, surface_z + 0.2), dtype=float)
 
-    custom_obj.set_rotation_euler(bproc.sampler.uniformSO3())
-    align_object_bottom_to_surface(custom_obj, pos_x, pos_y, surface_z)
+    placed = False
+    for _ in range(12):
+        def sample_pose(obj):
+            obj.set_location(sampled_loc)
+            obj.set_rotation_euler(bproc.sampler.uniformSO3())
+
+        placed_objects = bproc.object.sample_poses_on_surface(
+            objects_to_sample=[custom_obj],
+            surface=surface_obj,
+            sample_pose_func=sample_pose,
+            min_distance=0.0,
+            max_distance=10.0,
+            check_all_bb_corners_over_surface=False,
+        )
+        if not placed_objects:
+            continue
+
+        align_object_bottom_to_surface(custom_obj, pos_x, pos_y, surface_z)
+        placed = True
+        break
+
+    if not placed:
+        surface_obj.join_with_other_objects([support_obj])
+        return {"ok": False, "reason": "surface_sampler_failed", "support_name": support_name}
 
     if render_profile.LOGIC_CONFIG.get("use_physics", False):
         custom_obj.enable_rigidbody(True, collision_shape="CONVEX_HULL")
@@ -221,6 +244,19 @@ def maybe_rescale_to_sphere_radius(custom_obj, sphere_radius, surface_z, scale_f
     loc[2] += surface_z - object_bottom_z
     custom_obj.set_location(loc)
     return scale_factor * rescale
+
+
+def add_camera_poses_with_fallback(anchor, custom_obj, room_objs, sphere_radius):
+    try:
+        return render_mod.add_batch_render_camera_poses(
+            anchor, custom_obj, room_objs + [custom_obj], sphere_radius=sphere_radius
+        )
+    except RuntimeError as exc:
+        if "No valid camera pose found" not in str(exc):
+            raise
+        return render_mod.add_batch_render_camera_poses(
+            anchor, custom_obj, room_objs + [custom_obj], sphere_radius=None
+        )
 
 
 def main():
@@ -278,9 +314,7 @@ def main():
     anchor.hide(True)
     anchor.set_location(np.mean(custom_obj.get_bound_box(), axis=0))
 
-    camera_count = render_mod.add_batch_render_camera_poses(
-        anchor, custom_obj, room_objs + [custom_obj], sphere_radius=sphere_radius
-    )
+    camera_count = add_camera_poses_with_fallback(anchor, custom_obj, room_objs, sphere_radius)
 
     bproc.renderer.enable_depth_output(activate_antialiasing=False)
     bproc.renderer.enable_normals_output()
