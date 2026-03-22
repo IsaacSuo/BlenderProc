@@ -137,9 +137,37 @@ def _safe_float(value, name):
         raise ValueError(f"Invalid numeric value for {name}: {value}") from exc
 
 
+def _load_csv_rows(path):
+    with open(path, newline="", encoding="utf-8-sig") as file:
+        sample = file.read(4096)
+        file.seek(0)
+
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
+        except csv.Error:
+            dialect = csv.excel
+
+        reader = csv.DictReader(file, dialect=dialect)
+        if not reader.fieldnames:
+            raise RuntimeError(f"No header found in placement file: {path}")
+
+        fieldnames = [name.strip() if name is not None else name for name in reader.fieldnames]
+        rows = []
+        for row_index, row in enumerate(reader):
+            clean_row = {}
+            for key, value in row.items():
+                if key is None:
+                    continue
+                clean_row[key.strip()] = value.strip() if isinstance(value, str) else value
+            if "placement_id" not in clean_row:
+                clean_row["placement_id"] = str(row_index)
+            rows.append(clean_row)
+
+    return fieldnames, rows
+
+
 def load_placement(placement_file, placement_id, front_json_name):
-    with open(placement_file, newline="", encoding="utf-8") as file:
-        rows = list(csv.DictReader(file))
+    _, rows = _load_csv_rows(placement_file)
     if not rows:
         raise RuntimeError(f"No rows in placement file: {placement_file}")
 

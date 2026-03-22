@@ -138,11 +138,9 @@ def scan_all_placements(room_objs, obj_half_height, probe_directions, logic, top
     min_radius = float(logic.get("min_sphere_radius", 0.3))
     max_radius = float(logic.get("max_sphere_radius", 3.0))
 
-    # Build BVH tree once for the entire scene
-    bvh_objs = [o for o in room_objs if is_valid_mesh_object(o)]
-    if not bvh_objs:
+    scene_bvh_objs = [o for o in room_objs if is_valid_mesh_object(o)]
+    if not scene_bvh_objs:
         return []
-    bvh_tree = bproc.object.create_bvh_tree_multi_objects(bvh_objs)
 
     all_results = []
 
@@ -164,6 +162,12 @@ def scan_all_placements(room_objs, obj_half_height, probe_directions, logic, top
             continue
         if surface_obj is None:
             continue
+
+        support_excluded_bvh_objs = [o for o in scene_bvh_objs if o != obj]
+        if not support_excluded_bvh_objs:
+            surface_obj.join_with_other_objects([obj])
+            continue
+        bvh_tree = bproc.object.create_bvh_tree_multi_objects(support_excluded_bvh_objs)
 
         for _ in range(n_candidates):
             try:
