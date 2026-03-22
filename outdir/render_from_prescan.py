@@ -10,6 +10,7 @@ from pathlib import Path
 
 import bpy
 import numpy as np
+from blenderproc.python.utility.CollisionUtility import CollisionUtility
 
 
 def _load_module(name, path):
@@ -156,7 +157,7 @@ def align_object_bottom_to_surface(custom_obj, pos_x, pos_y, surface_z):
     custom_obj.set_location(location)
 
 
-def place_object_with_fixed_location(custom_obj, support_obj, placement):
+def place_object_with_fixed_location(custom_obj, support_obj, room_objs, placement):
     support_name = support_obj.get_name()
     surface_obj = bproc.object.slice_faces_with_normals(support_obj)
     if surface_obj is None:
@@ -165,32 +166,27 @@ def place_object_with_fixed_location(custom_obj, support_obj, placement):
     pos_x = _safe_float(placement["pos_x"], "pos_x")
     pos_y = _safe_float(placement["pos_y"], "pos_y")
     surface_z = _safe_float(placement["surface_z"], "surface_z")
-    sampled_loc = np.array((pos_x, pos_y, surface_z + 0.2), dtype=float)
-
+    bvh_cache = {}
+    blockers = [obj for obj in room_objs if obj != support_obj and obj != custom_obj]
     placed = False
-    for _ in range(12):
-        def sample_pose(obj):
-            obj.set_location(sampled_loc)
-            obj.set_rotation_euler(bproc.sampler.uniformSO3())
 
-        placed_objects = bproc.object.sample_poses_on_surface(
-            objects_to_sample=[custom_obj],
-            surface=surface_obj,
-            sample_pose_func=sample_pose,
-            min_distance=0.0,
-            max_distance=10.0,
-            check_all_bb_corners_over_surface=False,
-        )
-        if not placed_objects:
+    for _ in range(24):
+        custom_obj.set_rotation_euler(bproc.sampler.uniformSO3())
+        align_object_bottom_to_surface(custom_obj, pos_x, pos_y, surface_z)
+
+        center = np.mean(custom_obj.get_bound_box(), axis=0)
+        if not surface_obj.position_is_above_object(center + np.array([0.0, 0.0, 1.0]), [0.0, 0.0, -1.0], False):
             continue
 
-        align_object_bottom_to_surface(custom_obj, pos_x, pos_y, surface_z)
+        if not CollisionUtility.check_intersections(custom_obj, bvh_cache, blockers, []):
+            continue
+
         placed = True
         break
 
     if not placed:
         surface_obj.join_with_other_objects([support_obj])
-        return {"ok": False, "reason": "surface_sampler_failed", "support_name": support_name}
+        return {"ok": False, "reason": "fixed_location_collision_or_outside_surface", "support_name": support_name}
 
     if render_profile.LOGIC_CONFIG.get("use_physics", False):
         custom_obj.enable_rigidbody(True, collision_shape="CONVEX_HULL")
@@ -296,7 +292,7 @@ def main():
     custom_obj = render_mod.load_custom_object(paths["object_path"])
     scale_factor = render_mod.scale_object_to_target_size(custom_obj, args.target_max_size)
 
-    placement_info = place_object_with_fixed_location(custom_obj, support_obj, placement)
+    placement_info = place_object_with_fixed_location(custom_obj, support_obj, room_objs, placement)
     if not placement_info["ok"]:
         custom_obj.delete()
         raise RuntimeError(
