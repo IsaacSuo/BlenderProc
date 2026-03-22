@@ -73,6 +73,26 @@ def is_valid_mesh_object(obj):
         return False
 
 
+def get_fresh_bvh_objects_excluding_names(excluded_names):
+    """Fetch fresh mesh wrappers from the current scene to avoid stale StructRNA references."""
+    fresh_objs = []
+    for obj in bproc.object.get_all_mesh_objects():
+        if not is_valid_mesh_object(obj):
+            continue
+        try:
+            if obj.get_name() in excluded_names:
+                continue
+            # Touch mesh data once here so invalid references are filtered before BVH creation.
+            mesh = obj.get_mesh()
+            if mesh is None:
+                continue
+            _ = mesh.vertices
+        except ReferenceError:
+            continue
+        fresh_objs.append(obj)
+    return fresh_objs
+
+
 def generate_probe_directions(n):
     return render_profile.generate_fibonacci_points(
         n_samples=n, radius=1.0, center_loc=Vector((0, 0, 0)), hemisphere=False,
@@ -162,11 +182,10 @@ def scan_all_placements(room_objs, obj_half_height, probe_directions, logic, top
         if surface_obj is None:
             continue
 
-        # Recompute valid objects each iteration because join_with_other_objects() invalidates old references.
-        support_excluded_bvh_objs = [
-            o for o in room_objs
-            if o != obj and is_valid_mesh_object(o)
-        ]
+        # Rebuild BVH inputs from the current scene. slice/join can invalidate old MeshObject wrappers.
+        support_excluded_bvh_objs = get_fresh_bvh_objects_excluding_names(
+            {support_name, surface_obj.get_name()}
+        )
         if not support_excluded_bvh_objs:
             surface_obj.join_with_other_objects([obj])
             continue
