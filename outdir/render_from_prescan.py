@@ -5,11 +5,11 @@ import csv
 import importlib.util
 import math
 import os
-import random
 from pathlib import Path
 
 import bpy
 import numpy as np
+from mathutils import Matrix, Vector
 from blenderproc.python.utility.CollisionUtility import CollisionUtility
 
 
@@ -157,6 +157,31 @@ def align_object_bottom_to_surface(custom_obj, pos_x, pos_y, surface_z):
     custom_obj.set_location(location)
 
 
+def raycast_surface_height(surface_obj, pos_x, pos_y):
+    surface_bbox = np.array(surface_obj.get_bound_box(), dtype=float)
+    top_z = float(np.max(surface_bbox[:, 2]))
+    bottom_z = float(np.min(surface_bbox[:, 2]))
+    cast_distance = max(5.0, (top_z - bottom_z) + 5.0)
+    origin_world = Vector((float(pos_x), float(pos_y), top_z + 1.0))
+    direction_world = Vector((0.0, 0.0, -1.0))
+
+    local2world = Matrix(surface_obj.get_local2world_mat())
+    world2local = Matrix(np.linalg.inv(surface_obj.get_local2world_mat()))
+    origin_local = world2local @ origin_world
+    direction_local = (world2local.to_3x3() @ direction_world).normalized()
+
+    hit, location, _, _ = surface_obj.blender_obj.ray_cast(
+        origin_local,
+        direction_local,
+        distance=cast_distance,
+    )
+    if not hit:
+        return None
+
+    hit_world = local2world @ Vector(location)
+    return float(hit_world[2])
+
+
 def place_object_with_fixed_location(custom_obj, support_obj, room_objs, placement):
     support_name = support_obj.get_name()
     surface_obj = bproc.object.slice_faces_with_normals(support_obj)
@@ -165,28 +190,17 @@ def place_object_with_fixed_location(custom_obj, support_obj, room_objs, placeme
 
     pos_x = _safe_float(placement["pos_x"], "pos_x")
     pos_y = _safe_float(placement["pos_y"], "pos_y")
-    surface_z = _safe_float(placement["surface_z"], "surface_z")
-    bvh_cache = {}
-    blockers = [obj for obj in room_objs if obj != support_obj and obj != custom_obj]
-    placed = False
-
-    for _ in range(24):
-        custom_obj.set_rotation_euler(bproc.sampler.uniformSO3())
-        align_object_bottom_to_surface(custom_obj, pos_x, pos_y, surface_z)
-
-        center = np.mean(custom_obj.get_bound_box(), axis=0)
-        if not surface_obj.position_is_above_object(center + np.array([0.0, 0.0, 1.0]), [0.0, 0.0, -1.0], False):
-            continue
-
-        if not CollisionUtility.check_intersections(custom_obj, bvh_cache, blockers, []):
-            continue
-
-        placed = True
-        break
-
-    if not placed:
+    hit_surface_z = raycast_surface_height(surface_obj, pos_x, pos_y)
+    if hit_surface_z is None:
         surface_obj.join_with_other_objects([support_obj])
-        return {"ok": False, "reason": "fixed_location_collision_or_outside_surface", "support_name": support_name}
+        return {"ok": False, "reason": "no_surface_hit_at_xy", "support_name": support_name}
+
+    align_object_bottom_to_surface(custom_obj, pos_x, pos_y, hit_surface_z)
+
+    blockers = [obj for obj in room_objs if obj != support_obj and obj != custom_obj]
+    if not CollisionUtility.check_intersections(custom_obj, {}, blockers, []):
+        surface_obj.join_with_other_objects([support_obj])
+        return {"ok": False, "reason": "collision_at_fixed_xy", "support_name": support_name}
 
     if render_profile.LOGIC_CONFIG.get("use_physics", False):
         custom_obj.enable_rigidbody(True, collision_shape="CONVEX_HULL")
@@ -201,7 +215,7 @@ def place_object_with_fixed_location(custom_obj, support_obj, room_objs, placeme
     surface_name = surface_obj.get_name()
     surface_obj.join_with_other_objects([support_obj])
 
-    if abs(object_bottom_z - surface_z) > 0.05:
+    if abs(object_bottom_z - hit_surface_z) > 0.05:
         return {
             "ok": False,
             "reason": "object_bottom_not_aligned_with_surface",
@@ -212,6 +226,7 @@ def place_object_with_fixed_location(custom_obj, support_obj, room_objs, placeme
         "ok": True,
         "support_name": support_name,
         "surface_name": surface_name,
+        "surface_z": hit_surface_z,
     }
 
 
@@ -258,9 +273,6 @@ def add_camera_poses_with_fallback(anchor, custom_obj, room_objs, sphere_radius)
 def main():
     args = parse_args()
     placement = load_placement(args.placement_file, args.placement_id, args.front_json_name)
-
-    master_seed = int(render_profile.LOGIC_CONFIG.get("master_seed", 0))
-    random.Random(master_seed if master_seed != 0 else None)
     paths = resolve_paths(args, placement)
 
     bproc.init()
@@ -293,14 +305,14 @@ def main():
     scale_factor = render_mod.scale_object_to_target_size(custom_obj, args.target_max_size)
 
     placement_info = place_object_with_fixed_location(custom_obj, support_obj, room_objs, placement)
+    sphere_radius = _safe_float(placement["sphere_radius"], "sphere_radius")
     if not placement_info["ok"]:
         custom_obj.delete()
         raise RuntimeError(
             f"Failed to place object from placement file: {placement_info.get('reason', 'unknown')}"
         )
 
-    sphere_radius = _safe_float(placement["sphere_radius"], "sphere_radius")
-    surface_z = _safe_float(placement["surface_z"], "surface_z")
+    surface_z = float(placement_info["surface_z"])
     scale_factor = maybe_rescale_to_sphere_radius(custom_obj, sphere_radius, surface_z, scale_factor)
 
     render_mod.apply_batch_render_material_strategy(custom_obj, paths["object_path"])
