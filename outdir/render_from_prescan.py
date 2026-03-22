@@ -9,8 +9,6 @@ from pathlib import Path
 
 import bpy
 import numpy as np
-from mathutils import Matrix, Vector
-from blenderproc.python.utility.CollisionUtility import CollisionUtility
 
 
 def _load_module(name, path):
@@ -148,89 +146,31 @@ def find_support_object(room_objs, support_name):
     raise KeyError(f"Support object not found in loaded scene: {support_name}")
 
 
-def align_object_bottom_to_surface(custom_obj, pos_x, pos_y, surface_z):
-    current_loc = np.array(custom_obj.get_location(), dtype=float)
-    custom_obj.set_location(np.array((pos_x, pos_y, current_loc[2]), dtype=float))
-    object_bottom_z = float(np.min(custom_obj.get_bound_box(local_coords=False), axis=0)[2])
-    location = np.array(custom_obj.get_location(), dtype=float)
-    location[2] += surface_z - object_bottom_z
-    custom_obj.set_location(location)
-
-
-def raycast_surface_height(surface_obj, pos_x, pos_y):
-    surface_bbox = np.array(surface_obj.get_bound_box(), dtype=float)
-    top_z = float(np.max(surface_bbox[:, 2]))
-    bottom_z = float(np.min(surface_bbox[:, 2]))
-    cast_distance = max(5.0, (top_z - bottom_z) + 5.0)
-    origin_world = Vector((float(pos_x), float(pos_y), top_z + 1.0))
-    direction_world = Vector((0.0, 0.0, -1.0))
-
-    local2world = Matrix(surface_obj.get_local2world_mat())
-    world2local = Matrix(np.linalg.inv(surface_obj.get_local2world_mat()))
-    origin_local = world2local @ origin_world
-    direction_local = (world2local.to_3x3() @ direction_world).normalized()
-
-    hit, location, _, _ = surface_obj.blender_obj.ray_cast(
-        origin_local,
-        direction_local,
-        distance=cast_distance,
-    )
-    if not hit:
-        return None
-
-    hit_world = local2world @ Vector(location)
-    return float(hit_world[2])
-
-
 def place_object_with_fixed_location(custom_obj, support_obj, room_objs, placement):
     support_name = support_obj.get_name()
-    surface_obj = bproc.object.slice_faces_with_normals(support_obj)
-    if surface_obj is None:
-        return {"ok": False, "reason": "no_upward_surface_extracted", "support_name": support_name}
-
     pos_x = _safe_float(placement["pos_x"], "pos_x")
     pos_y = _safe_float(placement["pos_y"], "pos_y")
-    hit_surface_z = raycast_surface_height(surface_obj, pos_x, pos_y)
-    if hit_surface_z is None:
-        surface_obj.join_with_other_objects([support_obj])
-        return {"ok": False, "reason": "no_surface_hit_at_xy", "support_name": support_name}
-
-    align_object_bottom_to_surface(custom_obj, pos_x, pos_y, hit_surface_z)
-
-    blockers = [obj for obj in room_objs if obj != support_obj and obj != custom_obj]
-    if not CollisionUtility.check_intersections(custom_obj, {}, blockers, []):
-        surface_obj.join_with_other_objects([support_obj])
-        return {"ok": False, "reason": "collision_at_fixed_xy", "support_name": support_name}
+    pos_z = _safe_float(placement["pos_z"], "pos_z")
+    custom_obj.set_location(np.array((pos_x, pos_y, pos_z), dtype=float))
 
     if render_profile.LOGIC_CONFIG.get("use_physics", False):
         custom_obj.enable_rigidbody(True, collision_shape="CONVEX_HULL")
-        surface_obj.enable_rigidbody(False)
+        support_obj.enable_rigidbody(False)
         bproc.object.simulate_physics_and_fix_final_poses(
             min_simulation_time=2,
             max_simulation_time=4,
             check_object_interval=1,
         )
 
-    object_bottom_z = float(np.min(custom_obj.get_bound_box(local_coords=False), axis=0)[2])
-    surface_name = surface_obj.get_name()
-    surface_obj.join_with_other_objects([support_obj])
-
-    if abs(object_bottom_z - hit_surface_z) > 0.05:
-        return {
-            "ok": False,
-            "reason": "object_bottom_not_aligned_with_surface",
-            "support_name": support_name,
-        }
-
     return {
         "ok": True,
         "support_name": support_name,
-        "surface_name": surface_name,
-        "surface_z": hit_surface_z,
+        "surface_name": "",
+        "center_z": pos_z,
     }
 
 
-def maybe_rescale_to_sphere_radius(custom_obj, sphere_radius, surface_z, scale_factor):
+def maybe_rescale_to_sphere_radius(custom_obj, sphere_radius, scale_factor):
     if sphere_radius is None:
         return scale_factor
 
@@ -247,13 +187,11 @@ def maybe_rescale_to_sphere_radius(custom_obj, sphere_radius, surface_z, scale_f
     if current_size <= 0:
         return scale_factor
 
+    current_loc = np.array(custom_obj.get_location(), dtype=float)
     rescale = ideal_diameter / current_size
     custom_obj.set_scale(np.array(custom_obj.blender_obj.scale) * rescale)
     custom_obj.persist_transformation_into_mesh(location=False, rotation=False, scale=True)
-    object_bottom_z = float(np.min(custom_obj.get_bound_box(local_coords=False), axis=0)[2])
-    loc = np.array(custom_obj.get_location(), dtype=float)
-    loc[2] += surface_z - object_bottom_z
-    custom_obj.set_location(loc)
+    custom_obj.set_location(current_loc)
     return scale_factor * rescale
 
 
@@ -312,8 +250,7 @@ def main():
             f"Failed to place object from placement file: {placement_info.get('reason', 'unknown')}"
         )
 
-    surface_z = float(placement_info["surface_z"])
-    scale_factor = maybe_rescale_to_sphere_radius(custom_obj, sphere_radius, surface_z, scale_factor)
+    scale_factor = maybe_rescale_to_sphere_radius(custom_obj, sphere_radius, scale_factor)
 
     render_mod.apply_batch_render_material_strategy(custom_obj, paths["object_path"])
 
@@ -340,7 +277,7 @@ def main():
         surface_name=placement_info["surface_name"],
         scale_factor=scale_factor,
         camera_count=camera_count,
-        placement_mode="prescan_file",
+        placement_mode="prescan_float",
         sphere_radius=sphere_radius,
     )
 
