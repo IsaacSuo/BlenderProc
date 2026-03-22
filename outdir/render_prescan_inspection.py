@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 
+import bpy
 import numpy as np
 from PIL import Image
 
@@ -127,6 +128,12 @@ def parse_args():
         default=(1.0, 0.1, 0.1),
         help="Marker base color as R G B in 0..1.",
     )
+    parser.add_argument(
+        "--lighting-mode",
+        choices=("scene", "hybrid", "debug"),
+        default="hybrid",
+        help="Lighting strategy for inspection renders.",
+    )
     return parser.parse_args()
 
 
@@ -244,6 +251,69 @@ def add_debug_marker(target_point, radius, color_rgb):
     return marker
 
 
+def setup_inspection_world(strength=0.2, color=(1.0, 1.0, 1.0)):
+    world = bpy.context.scene.world
+    if world is None:
+        world = bpy.data.worlds.new("InspectionWorld")
+        bpy.context.scene.world = world
+    world.use_nodes = True
+    bg_node = world.node_tree.nodes.get("Background")
+    if bg_node is not None:
+        bg_node.inputs["Color"].default_value = (float(color[0]), float(color[1]), float(color[2]), 1.0)
+        bg_node.inputs["Strength"].default_value = float(strength)
+
+
+def _create_area_light(name, location, target_point, energy, size, color):
+    light = bproc.types.Light(light_type="AREA", name=name)
+    light.set_location(location)
+    light.set_energy(float(energy))
+    light.set_color(list(color))
+    light.blender_obj.data.shape = "RECTANGLE"
+    light.blender_obj.data.size = float(size[0])
+    light.blender_obj.data.size_y = float(size[1])
+    light.blender_obj.rotation_euler = bproc.camera.rotation_from_forward_vec(
+        np.array(target_point, dtype=float) - np.array(location, dtype=float)
+    ).to_euler()
+    return light
+
+
+def add_inspection_lights(target_point, camera_distance):
+    distance = max(float(camera_distance), 0.8)
+    z = float(target_point[2])
+    cx = float(target_point[0])
+    cy = float(target_point[1])
+
+    lights = []
+    lights.append(
+        _create_area_light(
+            "InspectKeyTop",
+            [cx, cy, z + 1.8],
+            target_point,
+            energy=1200.0,
+            size=(1.2, 1.2),
+            color=(1.0, 0.98, 0.95),
+        )
+    )
+    side_specs = [
+        ("InspectFillFront", [cx, cy - distance, z + 0.9], 700.0, (0.98, 0.98, 1.0)),
+        ("InspectFillBack", [cx, cy + distance, z + 0.9], 500.0, (1.0, 0.97, 0.95)),
+        ("InspectFillRight", [cx + distance, cy, z + 0.8], 450.0, (1.0, 1.0, 1.0)),
+        ("InspectFillLeft", [cx - distance, cy, z + 0.8], 450.0, (1.0, 1.0, 1.0)),
+    ]
+    for name, location, energy, color in side_specs:
+        lights.append(
+            _create_area_light(
+                name,
+                location,
+                target_point,
+                energy=energy,
+                size=(0.9, 0.9),
+                color=color,
+            )
+        )
+    return lights
+
+
 def _cardinal_label(index, num_views):
     if num_views == 4:
         return ["front", "right", "back", "left"][index]
@@ -311,6 +381,7 @@ def write_metadata(output_dir, placement, target_point, camera_distance, args, c
         "include_top_view": bool(args.include_top_view),
         "top_view_height": args.top_view_height,
         "marker_radius": args.marker_radius,
+        "lighting_mode": args.lighting_mode,
         "camera_entries": camera_entries,
     }
     with open(os.path.join(output_dir, "inspection_metadata.json"), "w", encoding="utf-8") as file:
@@ -357,9 +428,19 @@ def main():
         label_mapping=mapping,
         lamp_light_strength=0,
     )
-    lamp_lighting.apply_lighting_to_scene(room_objs, paths["front_json"])
+    if args.lighting_mode in ("scene", "hybrid"):
+        lamp_lighting.apply_lighting_to_scene(room_objs, paths["front_json"])
 
     render_profile.setup_render_settings()
+    if args.lighting_mode == "scene":
+        setup_inspection_world(strength=0.05)
+    elif args.lighting_mode == "hybrid":
+        setup_inspection_world(strength=0.18)
+        add_inspection_lights(target_point, camera_distance)
+    else:
+        setup_inspection_world(strength=0.3)
+        add_inspection_lights(target_point, camera_distance)
+
     bproc.camera.set_intrinsics_from_blender_params(
         lens=render_profile.LOGIC_CONFIG["lens"],
         image_width=render_profile.RENDER_CONFIG["res_x"],
