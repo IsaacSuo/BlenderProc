@@ -10,6 +10,7 @@ from pathlib import Path
 
 import bpy
 import numpy as np
+from mathutils import Matrix
 from PIL import Image
 
 
@@ -271,9 +272,10 @@ def _create_area_light(name, location, target_point, energy, size, color):
     light.blender_obj.data.shape = "RECTANGLE"
     light.blender_obj.data.size = float(size[0])
     light.blender_obj.data.size_y = float(size[1])
-    light.blender_obj.rotation_euler = bproc.camera.rotation_from_forward_vec(
+    rotation_matrix = bproc.camera.rotation_from_forward_vec(
         np.array(target_point, dtype=float) - np.array(location, dtype=float)
-    ).to_euler()
+    )
+    light.blender_obj.rotation_euler = Matrix(rotation_matrix).to_euler()
     return light
 
 
