@@ -11,17 +11,17 @@ selection:
   scene_names: []
 
 logic:
-  num_views: 5
-  max_tries: 30000
+  num_views: 10
+  max_tries: 10000
   lens: 50
   height_min: 1.4
   height_max: 1.8
   pitch_min: 1.2217
   pitch_max: 1.338
-  coverage_score_min: 0.65
-  proximity_min: 0.5
-  proximity_avg_min: 1.5
-  proximity_avg_max: 5.0
+  coverage_score_min: 0.8
+  proximity_min: 1.0
+  proximity_avg_min: 2.5
+  proximity_avg_max: 3.5
   proximity_no_background: true
   special_object_names: ["chair", "sofa", "table", "bed"]
 

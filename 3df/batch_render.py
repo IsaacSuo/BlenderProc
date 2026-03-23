@@ -189,65 +189,39 @@ def sample_camera_poses(loaded_objects, config):
     height_max = float(logic_cfg.get("height_max", 1.8))
     pitch_min = float(logic_cfg.get("pitch_min", 1.2217))
     pitch_max = float(logic_cfg.get("pitch_max", 1.338))
-    base_coverage_score_min = float(logic_cfg.get("coverage_score_min", 0.8))
-    base_proximity_min = float(logic_cfg.get("proximity_min", 1.0))
-    base_proximity_avg_min = float(logic_cfg.get("proximity_avg_min", 2.5))
-    base_proximity_avg_max = float(logic_cfg.get("proximity_avg_max", 3.5))
-    base_no_background = bool(logic_cfg.get("proximity_no_background", True))
-
-    attempts = [
-        {
-            "coverage_score_min": base_coverage_score_min,
-            "proximity_checks": {
-                "min": base_proximity_min,
-                "avg": {
-                    "min": base_proximity_avg_min,
-                    "max": base_proximity_avg_max,
-                },
-                "no_background": base_no_background,
-            },
+    coverage_score_min = float(logic_cfg.get("coverage_score_min", 0.8))
+    proximity_checks = {
+        "min": float(logic_cfg.get("proximity_min", 1.0)),
+        "avg": {
+            "min": float(logic_cfg.get("proximity_avg_min", 2.5)),
+            "max": float(logic_cfg.get("proximity_avg_max", 3.5)),
         },
-        {
-            "coverage_score_min": max(0.45, base_coverage_score_min * 0.8),
-            "proximity_checks": {
-                "min": max(0.3, base_proximity_min * 0.8),
-                "avg": {
-                    "min": max(1.0, base_proximity_avg_min * 0.75),
-                    "max": max(base_proximity_avg_max, base_proximity_avg_max * 1.25),
-                },
-                "no_background": base_no_background,
-            },
-        },
-    ]
+        "no_background": bool(logic_cfg.get("proximity_no_background", True)),
+    }
 
     poses = 0
-    tries_per_attempt = max(max_tries // len(attempts), poses_target * 1000)
-    for attempt in attempts:
-        tries = 0
-        while tries < tries_per_attempt and poses < poses_target:
-            height = np.random.uniform(height_min, height_max)
-            location = point_sampler.sample(height)
-            rotation = np.random.uniform([pitch_min, 0.0, 0.0], [pitch_max, 0.0, np.pi * 2.0])
-            cam2world_matrix = bproc.math.build_transformation_mat(location, rotation)
+    tries = 0
+    while tries < max_tries and poses < poses_target:
+        height = np.random.uniform(height_min, height_max)
+        location = point_sampler.sample(height)
+        rotation = np.random.uniform([pitch_min, 0.0, 0.0], [pitch_max, 0.0, np.pi * 2.0])
+        cam2world_matrix = bproc.math.build_transformation_mat(location, rotation)
 
-            coverage_ok = True
-            if special_objects:
-                coverage = bproc.camera.scene_coverage_score(
-                    cam2world_matrix,
-                    special_objects,
-                    special_objects_weight=10.0,
-                )
-                coverage_ok = coverage > attempt["coverage_score_min"]
+        coverage_ok = True
+        if special_objects:
+            coverage = bproc.camera.scene_coverage_score(
+                cam2world_matrix,
+                special_objects,
+                special_objects_weight=10.0,
+            )
+            coverage_ok = coverage > coverage_score_min
 
-            if coverage_ok and bproc.camera.perform_obstacle_in_view_check(
-                cam2world_matrix, attempt["proximity_checks"], bvh_tree
-            ):
-                bproc.camera.add_camera_pose(cam2world_matrix)
-                poses += 1
-            tries += 1
-
-        if poses >= poses_target:
-            break
+        if coverage_ok and bproc.camera.perform_obstacle_in_view_check(
+            cam2world_matrix, proximity_checks, bvh_tree
+        ):
+            bproc.camera.add_camera_pose(cam2world_matrix)
+            poses += 1
+        tries += 1
 
     return poses
 
