@@ -98,6 +98,24 @@ def configure_scene(config):
     render_cfg = config.get("render", {})
     logic_cfg = config.get("logic", {})
 
+    device_mode = str(render_cfg.get("device", "GPU")).upper()
+    use_only_cpu = device_mode == "CPU"
+    gpu_backend = render_cfg.get("gpu_backend")
+    gpu_indices = render_cfg.get("gpu_indices")
+    bproc.renderer.set_render_devices(
+        use_only_cpu=use_only_cpu,
+        desired_gpu_device_type=gpu_backend,
+        desired_gpu_ids=gpu_indices,
+    )
+
+    samples_max = int(render_cfg.get("samples_max", 128))
+    noise_threshold = float(render_cfg.get("noise_threshold", 0.03))
+    use_denoising = bool(render_cfg.get("use_denoising", True))
+    denoiser = render_cfg.get("denoiser", "OPTIX" if not use_only_cpu else "INTEL")
+    bproc.renderer.set_max_amount_of_samples(samples_max)
+    bproc.renderer.set_noise_threshold(noise_threshold)
+    bproc.renderer.set_denoiser(denoiser if use_denoising else None)
+
     res_x = int(render_cfg.get("res_x", 1600))
     res_y = int(render_cfg.get("res_y", 1200))
     lens = float(logic_cfg.get("lens", 50.0))
@@ -109,11 +127,11 @@ def configure_scene(config):
 
     light_paths = render_cfg.get("light_paths", {})
     bproc.renderer.set_light_bounces(
-        diffuse_bounces=int(light_paths.get("diffuse_bounces", 200)),
-        glossy_bounces=int(light_paths.get("glossy_bounces", 200)),
-        max_bounces=int(light_paths.get("max_bounces", 200)),
-        transmission_bounces=int(light_paths.get("transmission", 200)),
-        transparent_max_bounces=int(light_paths.get("transparent_max", 200)),
+        diffuse_bounces=int(light_paths.get("diffuse_bounces", 4)),
+        glossy_bounces=int(light_paths.get("glossy_bounces", 4)),
+        max_bounces=int(light_paths.get("max_bounces", 8)),
+        transmission_bounces=int(light_paths.get("transmission", 8)),
+        transparent_max_bounces=int(light_paths.get("transparent_max", 8)),
     )
 
     outputs_cfg = render_cfg.get("outputs", {})

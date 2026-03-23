@@ -11,31 +11,38 @@ selection:
   scene_names: []
 
 logic:
-  num_views: 10
-  max_tries: 10000
+  num_views: 5
+  max_tries: 30000
   lens: 50
   height_min: 1.4
   height_max: 1.8
   pitch_min: 1.2217
   pitch_max: 1.338
-  coverage_score_min: 0.8
-  proximity_min: 1.0
-  proximity_avg_min: 2.5
-  proximity_avg_max: 3.5
-  proximity_no_background: true
+  coverage_score_min: 0.3
+  proximity_min: 0.3
+  proximity_avg_min: 1.0
+  proximity_avg_max: 6.0
+  proximity_no_background: false
   special_object_names: ["chair", "sofa", "table", "bed"]
 
 render:
-  res_x: 1600
-  res_y: 1200
+  device: GPU
+  gpu_backend: OPTIX
+  gpu_indices: [0]
+  samples_max: 128
+  noise_threshold: 0.03
+  use_denoising: true
+  denoiser: OPTIX
+  res_x: 1024
+  res_y: 768
   light_paths:
-    max_bounces: 200
-    diffuse_bounces: 200
-    glossy_bounces: 200
-    transparent_max: 200
-    transmission: 200
+    max_bounces: 8
+    diffuse_bounces: 4
+    glossy_bounces: 4
+    transparent_max: 8
+    transmission: 8
   outputs:
     depth: false
-    normals: true
-    segmentation: true
+    normals: false
+    segmentation: false
     segmentation_map_by: ["category_id"]
