@@ -43,6 +43,32 @@ def validate_paths(args):
     os.makedirs(output_parent, exist_ok=True)
 
 
+def remove_non_scene_mesh_objects(scene_mesh_objects):
+    """Delete mesh objects that were imported as temporary furniture prototypes but are not part of the final scene."""
+    keep_ids = {obj.blender_obj.as_pointer() for obj in scene_mesh_objects}
+    remove_objects = []
+    for obj in list(bpy.data.objects):
+        if obj.type != "MESH":
+            continue
+        if obj.as_pointer() not in keep_ids:
+            remove_objects.append(obj)
+
+    for obj in remove_objects:
+        bpy.data.objects.remove(obj, do_unlink=True)
+
+    for mesh in list(bpy.data.meshes):
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+    for material in list(bpy.data.materials):
+        if material.users == 0:
+            bpy.data.materials.remove(material)
+    for image in list(bpy.data.images):
+        if image.users == 0:
+            bpy.data.images.remove(image)
+
+    return len(remove_objects)
+
+
 def main():
     args = parse_args()
     validate_paths(args)
@@ -52,7 +78,7 @@ def main():
     mapping_file = bproc.utility.resolve_resource(os.path.join("front_3D", "3D_front_mapping.csv"))
     mapping = bproc.utility.LabelIdMapping.from_csv(mapping_file)
 
-    bproc.loader.load_front3d(
+    scene_mesh_objects = bproc.loader.load_front3d(
         json_path=args.front_json,
         future_model_path=args.future_model_dir,
         front_3D_texture_path=args.front_texture_dir,
@@ -60,6 +86,7 @@ def main():
         ceiling_light_strength=args.ceiling_light_strength,
         lamp_light_strength=args.lamp_light_strength,
     )
+    removed_count = remove_non_scene_mesh_objects(scene_mesh_objects)
 
     if not args.skip_pack:
         bpy.ops.file.pack_all()
@@ -70,6 +97,7 @@ def main():
     print(f"Saved blend: {output_path}")
     print(f"Source json: {os.path.abspath(args.front_json)}")
     print(f"Packed resources: {not args.skip_pack}")
+    print(f"Removed temporary mesh objects: {removed_count}")
 
 
 if __name__ == "__main__":
