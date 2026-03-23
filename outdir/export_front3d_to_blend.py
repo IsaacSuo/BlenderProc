@@ -129,6 +129,12 @@ def uniformly_scale_scene(scene_mesh_objects, scale, pivot):
     return transformed
 
 
+def compute_compensated_emission_strength(base_strength, scene_scale):
+    if scene_scale <= 0:
+        raise ValueError(f"--scene-scale must be > 0, got {scene_scale}")
+    return float(base_strength) * (float(scene_scale) ** 2)
+
+
 def main():
     args = parse_args()
     validate_paths(args)
@@ -138,13 +144,22 @@ def main():
     mapping_file = bproc.utility.resolve_resource(os.path.join("front_3D", "3D_front_mapping.csv"))
     mapping = bproc.utility.LabelIdMapping.from_csv(mapping_file)
 
+    compensated_lamp_strength = compute_compensated_emission_strength(
+        args.lamp_light_strength,
+        args.scene_scale,
+    )
+    compensated_ceiling_strength = compute_compensated_emission_strength(
+        args.ceiling_light_strength,
+        args.scene_scale,
+    )
+
     scene_mesh_objects = bproc.loader.load_front3d(
         json_path=args.front_json,
         future_model_path=args.future_model_dir,
         front_3D_texture_path=args.front_texture_dir,
         label_mapping=mapping,
-        ceiling_light_strength=args.ceiling_light_strength,
-        lamp_light_strength=args.lamp_light_strength,
+        ceiling_light_strength=compensated_ceiling_strength,
+        lamp_light_strength=compensated_lamp_strength,
     )
     removed_count = remove_non_scene_mesh_objects(scene_mesh_objects)
 
@@ -163,6 +178,8 @@ def main():
     print(f"Packed resources: {not args.skip_pack}")
     print(f"Removed temporary mesh objects: {removed_count}")
     print(f"Scene scale: {args.scene_scale}")
+    print(f"Lamp emission strength: {compensated_lamp_strength}")
+    print(f"Ceiling emission strength: {compensated_ceiling_strength}")
     print(f"Scale pivot mode: {args.scale_pivot}")
     print(f"Scale pivot: {tuple(scale_pivot)}")
     print(f"Transformed scene objects: {scaled_count}")
