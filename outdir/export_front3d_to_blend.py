@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 
 import bpy
+import numpy as np
+from mathutils import Matrix, Vector
 
 
 def parse_args():
@@ -31,6 +33,18 @@ def parse_args():
         "--skip-pack",
         action="store_true",
         help="Do not pack external resources into the output .blend.",
+    )
+    parser.add_argument(
+        "--scene-scale",
+        type=float,
+        default=1.0,
+        help="Uniform scale factor applied to the exported scene before saving.",
+    )
+    parser.add_argument(
+        "--scale-pivot",
+        choices=("floor_center", "bbox_center", "origin"),
+        default="floor_center",
+        help="Pivot used for uniform scene scaling.",
     )
     return parser.parse_args()
 
@@ -69,6 +83,52 @@ def remove_non_scene_mesh_objects(scene_mesh_objects):
     return len(remove_objects)
 
 
+def compute_scene_pivot(scene_mesh_objects, pivot_mode):
+    if not scene_mesh_objects:
+        raise RuntimeError("No scene mesh objects were loaded; cannot compute scaling pivot.")
+
+    if pivot_mode == "origin":
+        return Vector((0.0, 0.0, 0.0))
+
+    all_points = []
+    for obj in scene_mesh_objects:
+        all_points.append(np.asarray(obj.get_bound_box(local_coords=False), dtype=float))
+
+    points = np.concatenate(all_points, axis=0)
+    min_xyz = points.min(axis=0)
+    max_xyz = points.max(axis=0)
+
+    if pivot_mode == "bbox_center":
+        return Vector(((min_xyz + max_xyz) * 0.5).tolist())
+
+    return Vector((
+        float((min_xyz[0] + max_xyz[0]) * 0.5),
+        float((min_xyz[1] + max_xyz[1]) * 0.5),
+        float(min_xyz[2]),
+    ))
+
+
+def uniformly_scale_scene(scene_mesh_objects, scale, pivot):
+    if scale <= 0:
+        raise ValueError(f"--scene-scale must be > 0, got {scale}")
+    if abs(scale - 1.0) < 1e-8:
+        return 0
+
+    transform = (
+        Matrix.Translation(pivot) @
+        Matrix.Scale(float(scale), 4) @
+        Matrix.Translation(-pivot)
+    )
+
+    transformed = 0
+    for obj in list(bpy.context.scene.objects):
+        obj.matrix_world = transform @ obj.matrix_world
+        transformed += 1
+
+    bpy.context.view_layer.update()
+    return transformed
+
+
 def main():
     args = parse_args()
     validate_paths(args)
@@ -88,6 +148,10 @@ def main():
     )
     removed_count = remove_non_scene_mesh_objects(scene_mesh_objects)
 
+    bpy.context.view_layer.update()
+    scale_pivot = compute_scene_pivot(scene_mesh_objects, args.scale_pivot)
+    scaled_count = uniformly_scale_scene(scene_mesh_objects, args.scene_scale, scale_pivot)
+
     if not args.skip_pack:
         bpy.ops.file.pack_all()
 
@@ -98,6 +162,10 @@ def main():
     print(f"Source json: {os.path.abspath(args.front_json)}")
     print(f"Packed resources: {not args.skip_pack}")
     print(f"Removed temporary mesh objects: {removed_count}")
+    print(f"Scene scale: {args.scene_scale}")
+    print(f"Scale pivot mode: {args.scale_pivot}")
+    print(f"Scale pivot: {tuple(scale_pivot)}")
+    print(f"Transformed scene objects: {scaled_count}")
 
 
 if __name__ == "__main__":
