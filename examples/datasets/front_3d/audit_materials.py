@@ -51,6 +51,12 @@ def parse_args():
         action="store_true",
         help="Allow importing the same 3D-FUTURE jid more than once across sampled scenes.",
     )
+    parser.add_argument(
+        "--jid",
+        action="append",
+        default=[],
+        help="Audit a specific 3D-FUTURE jid. Can be passed multiple times. Skips random sampling if provided.",
+    )
     return parser.parse_args()
 
 
@@ -114,6 +120,17 @@ def extract_used_furniture(scene_path: Path) -> List[dict]:
 
 
 def sample_candidates(args) -> List[dict]:
+    if args.jid:
+        return [
+            {
+                "scene_json": "",
+                "uid": "",
+                "jid": jid,
+                "category": "unknown",
+            }
+            for jid in args.jid
+        ]
+
     all_scenes = list_scene_jsons(args.front_json_dir)
     if not all_scenes:
         raise FileNotFoundError(f"No .json files found in {args.front_json_dir}")
@@ -143,31 +160,53 @@ def sample_candidates(args) -> List[dict]:
     return sampled
 
 
-def inspect_mtl(mtl_path: Path) -> dict:
+def read_obj_mtllibs(obj_path: Path) -> List[Path]:
+    mtl_paths = []
+    if not obj_path.exists():
+        return mtl_paths
+
+    with open(obj_path, "r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped.startswith("mtllib "):
+                continue
+            referenced = stripped.split(maxsplit=1)[1].strip()
+            if referenced:
+                mtl_paths.append(obj_path.parent / referenced)
+    return mtl_paths
+
+
+def inspect_mtl(mtl_paths: List[Path]) -> dict:
     report = {
-        "mtl_exists": mtl_path.exists(),
+        "mtl_exists": any(path.exists() for path in mtl_paths),
+        "mtl_path_count": len(mtl_paths),
+        "mtl_existing_path_count": sum(path.exists() for path in mtl_paths),
+        "mtl_paths": ";".join(str(path.name) for path in mtl_paths),
         "mtl_newmtl_count": 0,
         "mtl_has_map_ka": False,
         "mtl_has_map_kd": False,
         "mtl_has_tf": False,
         "mtl_has_tr": False,
     }
-    if not mtl_path.exists():
+    if not mtl_paths:
         return report
 
-    with open(mtl_path, "r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            stripped = line.strip()
-            if stripped.startswith("newmtl "):
-                report["mtl_newmtl_count"] += 1
-            elif stripped.startswith("map_Ka "):
-                report["mtl_has_map_ka"] = True
-            elif stripped.startswith("map_Kd "):
-                report["mtl_has_map_kd"] = True
-            elif stripped.startswith("Tf "):
-                report["mtl_has_tf"] = True
-            elif stripped.startswith("Tr "):
-                report["mtl_has_tr"] = True
+    for mtl_path in mtl_paths:
+        if not mtl_path.exists():
+            continue
+        with open(mtl_path, "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if stripped.startswith("newmtl "):
+                    report["mtl_newmtl_count"] += 1
+                elif stripped.startswith("map_Ka "):
+                    report["mtl_has_map_ka"] = True
+                elif stripped.startswith("map_Kd "):
+                    report["mtl_has_map_kd"] = True
+                elif stripped.startswith("Tf "):
+                    report["mtl_has_tf"] = True
+                elif stripped.startswith("Tr "):
+                    report["mtl_has_tr"] = True
     return report
 
 
@@ -269,8 +308,8 @@ def inspect_candidate(candidate: dict, future_model_dir: str) -> dict:
     jid = candidate["jid"]
     folder_path = Path(future_model_dir) / jid
     obj_path = folder_path / "raw_model.obj"
-    mtl_path = folder_path / "raw_model.mtl"
     texture_path = folder_path / "texture.png"
+    mtl_paths = read_obj_mtllibs(obj_path)
 
     row = {
         "scene_json": candidate["scene_json"],
@@ -282,7 +321,7 @@ def inspect_candidate(candidate: dict, future_model_dir: str) -> dict:
         "status": "not_imported",
         "error": "",
     }
-    row.update(inspect_mtl(mtl_path))
+    row.update(inspect_mtl(mtl_paths))
 
     import_report = {
         "imported_object_count": 0,
@@ -332,6 +371,9 @@ def write_csv(rows: List[dict], csv_path: Path):
         "obj_exists",
         "texture_exists",
         "mtl_exists",
+        "mtl_path_count",
+        "mtl_existing_path_count",
+        "mtl_paths",
         "mtl_newmtl_count",
         "mtl_has_map_ka",
         "mtl_has_map_kd",
