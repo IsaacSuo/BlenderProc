@@ -27,12 +27,12 @@ logic:
 
 render:
   device: GPU
-  gpu_backend: OPTIX
+  gpu_backend: CUDA
   gpu_indices: [0]
   samples_max: 128
   noise_threshold: 0.03
-  use_denoising: true
-  denoiser: OPTIX
+  use_denoising: false
+  denoiser: OPENIMAGEDENOISE
   res_x: 1024
   res_y: 768
   light_paths:
