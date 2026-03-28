@@ -16,12 +16,6 @@ FIRST_TIER_SUPPORTS = {
     80: "dressing table",
     72: "corner/side table",
     12: "round end table",
-    17: "bed",
-    67: "double bed",
-    70: "single bed",
-    20: "kids bed",
-    87: "bunk bed",
-    88: "bed frame",
     76: "nightstand",
     56: "tv stand",
     28: "sideboard / side cabinet / console",
@@ -36,6 +30,15 @@ FIRST_TIER_SUPPORTS = {
     23: "media unit",
     84: "wardrobe",
     65: "wine cooler",
+}
+
+BED_SUPPORTS = {
+    17: "bed",
+    67: "double bed",
+    70: "single bed",
+    20: "kids bed",
+    87: "bunk bed",
+    88: "bed frame",
 }
 
 SECOND_TIER_SUPPORTS = {
@@ -85,6 +88,11 @@ def parse_args():
         help="Also add anchors to floor objects.",
     )
     parser.add_argument(
+        "--include-beds",
+        action="store_true",
+        help="Also add anchors to bed-like supports.",
+    )
+    parser.add_argument(
         "--replace-existing-anchors",
         action="store_true",
         help="Remove existing ANCHOR* objects before creating new ones.",
@@ -116,7 +124,7 @@ def parse_args():
     parser.add_argument(
         "--z-offset",
         type=float,
-        default=0.0,
+        default=0.5,
         help="Extra world-space Z offset applied to created anchors.",
     )
     return parser.parse_args(argv)
@@ -126,8 +134,10 @@ def normalized_text(text):
     return re.sub(r"[^a-z0-9]+", " ", str(text).lower()).strip()
 
 
-def build_support_rules(include_secondary, include_floor):
+def build_support_rules(include_secondary, include_floor, include_beds):
     supports = dict(FIRST_TIER_SUPPORTS)
+    if include_beds:
+        supports.update(BED_SUPPORTS)
     if include_secondary:
         supports.update(SECOND_TIER_SUPPORTS)
     if include_floor:
@@ -288,7 +298,11 @@ def candidate_sort_key(item):
 
 def main():
     args = parse_args()
-    support_map, keywords = build_support_rules(args.include_secondary_supports, args.include_floor)
+    support_map, keywords = build_support_rules(
+        args.include_secondary_supports,
+        args.include_floor,
+        args.include_beds,
+    )
 
     if args.replace_existing_anchors:
         removed = remove_existing_anchors()
@@ -346,6 +360,7 @@ def main():
         "source_blend": bpy.data.filepath,
         "output_blend": output_blend,
         "removed_existing_anchors": removed,
+        "include_beds": bool(args.include_beds),
         "anchor_count": len(created),
         "anchors": created,
     }

@@ -46,6 +46,11 @@ def parse_args():
         help="Also place anchors on floor objects.",
     )
     parser.add_argument(
+        "--include-beds",
+        action="store_true",
+        help="Also place anchors on bed-like supports.",
+    )
+    parser.add_argument(
         "--replace-existing-anchors",
         action="store_true",
         help="Remove existing ANCHOR* objects before writing the output blend.",
@@ -54,7 +59,7 @@ def parse_args():
     parser.add_argument("--anchor-scale", type=float, default=0.5)
     parser.add_argument("--surface-angle-deg", type=float, default=15.0)
     parser.add_argument("--top-band", type=float, default=0.03)
-    parser.add_argument("--z-offset", type=float, default=0.0)
+    parser.add_argument("--z-offset", type=float, default=0.5)
     return parser.parse_args()
 
 
@@ -107,6 +112,8 @@ def build_command(args, input_blend, output_blend):
         cmd.append("--include-secondary-supports")
     if args.include_floor:
         cmd.append("--include-floor")
+    if args.include_beds:
+        cmd.append("--include-beds")
     if args.replace_existing_anchors:
         cmd.append("--replace-existing-anchors")
     return cmd
