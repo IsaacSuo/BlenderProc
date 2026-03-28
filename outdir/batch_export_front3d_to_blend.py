@@ -33,7 +33,7 @@ def parse_args():
     parser.add_argument(
         "--scene-scale",
         type=float,
-        default=1.0,
+        default=10.0,
         help="Uniform scene scale forwarded to export_front3d_to_blend.py.",
     )
     parser.add_argument(
