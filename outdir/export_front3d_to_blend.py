@@ -6,7 +6,7 @@ from pathlib import Path
 
 import bpy
 import numpy as np
-from mathutils import Matrix, Vector
+from mathutils import Vector
 
 
 def parse_args():
@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument(
         "--scene-scale",
         type=float,
-        default=10.0,
+        default=20.0,
         help="Uniform scale factor applied to the exported scene before saving.",
     )
     parser.add_argument(
@@ -108,25 +108,49 @@ def compute_scene_pivot(scene_mesh_objects, pivot_mode):
     ))
 
 
+def _collect_scene_scale_roots(scene_mesh_objects):
+    roots = []
+    seen_root_ids = set()
+
+    for mesh_obj in scene_mesh_objects:
+        root = mesh_obj.blender_obj
+        while root.parent is not None:
+            root = root.parent
+        root_id = root.as_pointer()
+        if root_id in seen_root_ids:
+            continue
+        seen_root_ids.add(root_id)
+        roots.append(root)
+
+    if not roots and scene_mesh_objects:
+        raise RuntimeError("Failed to determine scene scale roots for exported objects.")
+
+    return roots
+
+
 def uniformly_scale_scene(scene_mesh_objects, scale, pivot):
     if scale <= 0:
         raise ValueError(f"--scene-scale must be > 0, got {scale}")
     if abs(scale - 1.0) < 1e-8:
         return 0
 
-    transform = (
-        Matrix.Translation(pivot) @
-        Matrix.Scale(float(scale), 4) @
-        Matrix.Translation(-pivot)
-    )
+    scale_roots = _collect_scene_scale_roots(scene_mesh_objects)
+    pivot_parent = bpy.data.objects.new("EXPORT_SCENE_SCALE_ROOT", None)
+    pivot_parent.empty_display_type = "PLAIN_AXES"
+    pivot_parent.empty_display_size = 0.25
+    pivot_parent.location = pivot
+    bpy.context.scene.collection.objects.link(pivot_parent)
 
-    transformed = 0
-    for obj in list(bpy.context.scene.objects):
-        obj.matrix_world = transform @ obj.matrix_world
-        transformed += 1
+    for obj in scale_roots:
+        original_world = obj.matrix_world.copy()
+        obj.parent = pivot_parent
+        obj.matrix_parent_inverse = pivot_parent.matrix_world.inverted()
+        obj.matrix_world = original_world
+
+    pivot_parent.scale = (float(scale), float(scale), float(scale))
 
     bpy.context.view_layer.update()
-    return transformed
+    return len(scale_roots)
 
 
 def main():
@@ -167,7 +191,7 @@ def main():
     print(f"Ceiling emission strength: {args.ceiling_light_strength}")
     print(f"Scale pivot mode: {args.scale_pivot}")
     print(f"Scale pivot: {tuple(scale_pivot)}")
-    print(f"Transformed scene objects: {scaled_count}")
+    print(f"Scaled scene roots: {scaled_count}")
 
 
 if __name__ == "__main__":
